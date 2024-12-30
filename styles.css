@@ -7,16 +7,18 @@
 body {
     background-color: #1a1a1a;
     display: flex;
-    justify-content: center;
+    flex-direction: column;
     align-items: center;
     min-height: 100vh;
     font-family: Arial, sans-serif;
+    padding: 20px;
 }
 
 #game-container {
     position: relative;
     width: 1280px;
     height: 720px;
+    margin-bottom: 20px;
 }
 
 #gameCanvas {
@@ -92,4 +94,36 @@ body {
 
 .control-button.disabled:hover {
     background-color: #da190b;
+}
+
+#debug-controls {
+    width: 1280px;
+    padding: 15px;
+    background: #333;
+    border-radius: 5px;
+}
+
+.debug-section {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    align-items: center;
+}
+
+.debug-section h3 {
+    color: white;
+    margin: 0;
+    margin-right: 20px;
+}
+
+.debug-section label {
+    color: white;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+}
+
+.debug-section input[type="checkbox"] {
+    cursor: pointer;
 } 
