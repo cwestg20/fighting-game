@@ -28,6 +28,20 @@ const MINIMAP_HEIGHT = 150;
 const MINIMAP_MARGIN = 10;
 const SPHERE_SHRINK_RATE = 0.5;
 
+// Add camera constants near other game constants
+const DEFAULT_ZOOM = 1.0;
+const MAX_ZOOM_OUT = 0.7;  // How far we can zoom out (smaller number = more zoomed out)
+const BASE_CAMERA_BUFFER_PERCENT = 0.2;  // Base buffer at default zoom
+const MIN_CAMERA_BUFFER_PERCENT = 0.1;   // Minimum buffer when zoomed out
+const ZOOM_SPEED = 0.03;  // Reduced from 0.05 for smoother zoom
+const CAMERA_MOVE_SPEED = 0.05;  // How fast the camera pans
+
+// Add camera state variables
+let currentZoom = DEFAULT_ZOOM;
+let targetZoom = DEFAULT_ZOOM;
+let targetCameraX = 0;
+let targetCameraY = 0;
+
 // Game state
 let frameCount = 0;
 let lastFpsTime = Date.now();
@@ -84,28 +98,89 @@ function calculateFPS() {
     }
 }
 
+function lerp(start, end, t) {
+    return start + (end - start) * t;
+}
+
 // Add this function to handle camera movement
 function updateCamera() {
-    // Calculate where the camera should try to be (centered on player)
+    // Calculate base camera position (centered on player)
     const targetX = player.x - VIEWPORT_WIDTH/2;
     const targetY = player.y - VIEWPORT_HEIGHT/2;
     
-    // Only move camera when player is near the edges
-    if (player.x - cameraX < CAMERA_BUFFER) {
-        cameraX = player.x - CAMERA_BUFFER;
-    } else if (player.x - cameraX > VIEWPORT_WIDTH - CAMERA_BUFFER) {
-        cameraX = player.x - (VIEWPORT_WIDTH - CAMERA_BUFFER);
+    // Calculate dynamic buffer based on current zoom
+    const zoomFactor = (currentZoom - MAX_ZOOM_OUT) / (DEFAULT_ZOOM - MAX_ZOOM_OUT);
+    const dynamicBuffer = MIN_CAMERA_BUFFER_PERCENT + 
+                         (BASE_CAMERA_BUFFER_PERCENT - MIN_CAMERA_BUFFER_PERCENT) * zoomFactor;
+    
+    // Check for nearby enemies with dynamic buffer
+    let nearbyEnemies = enemies.filter(enemy => {
+        const dx = Math.abs(enemy.x - player.x);
+        const dy = Math.abs(enemy.y - player.y);
+        return dx < VIEWPORT_WIDTH * (1 + dynamicBuffer) &&
+               dy < VIEWPORT_HEIGHT * (1 + dynamicBuffer);
+    });
+    
+    // Calculate target zoom based on nearby enemies
+    if (nearbyEnemies.length > 0) {
+        // Find the bounds of all relevant characters
+        let minX = player.x, maxX = player.x;
+        let minY = player.y, maxY = player.y;
+        let totalX = player.x;
+        let totalY = player.y;
+        let characterCount = 1;
+        
+        nearbyEnemies.forEach(enemy => {
+            minX = Math.min(minX, enemy.x);
+            maxX = Math.max(maxX, enemy.x);
+            minY = Math.min(minY, enemy.y);
+            maxY = Math.max(maxY, enemy.y);
+            totalX += enemy.x;
+            totalY += enemy.y;
+            characterCount++;
+        });
+        
+        // Calculate required zoom to fit all characters
+        const width = maxX - minX + 200;
+        const height = maxY - minY + 200;
+        const zoomX = VIEWPORT_WIDTH / width;
+        const zoomY = VIEWPORT_HEIGHT / height;
+        targetZoom = Math.max(Math.min(zoomX, zoomY, DEFAULT_ZOOM), MAX_ZOOM_OUT);
+        
+        // Set target camera position to center of action
+        const avgX = totalX / characterCount;
+        const avgY = totalY / characterCount;
+        
+        targetCameraX = avgX - VIEWPORT_WIDTH/(2 * currentZoom);
+        targetCameraY = avgY - VIEWPORT_HEIGHT/(2 * currentZoom);
+    } else {
+        // Return to default zoom and center on player
+        targetZoom = DEFAULT_ZOOM;
+        targetCameraX = targetX;
+        targetCameraY = targetY;
     }
     
-    if (player.y - cameraY < CAMERA_BUFFER) {
-        cameraY = player.y - CAMERA_BUFFER;
-    } else if (player.y - cameraY > VIEWPORT_HEIGHT - CAMERA_BUFFER) {
-        cameraY = player.y - (VIEWPORT_HEIGHT - CAMERA_BUFFER);
-    }
+    // Smoothly interpolate zoom and position
+    currentZoom = lerp(currentZoom, targetZoom, ZOOM_SPEED);
     
-    // Clamp camera to world bounds
-    cameraX = Math.max(0, Math.min(cameraX, WORLD_WIDTH - VIEWPORT_WIDTH));
-    cameraY = Math.max(0, Math.min(cameraY, WORLD_HEIGHT - VIEWPORT_HEIGHT));
+    // Calculate effective viewport dimensions with current zoom
+    const effectiveViewportWidth = VIEWPORT_WIDTH / currentZoom;
+    const effectiveViewportHeight = VIEWPORT_HEIGHT / currentZoom;
+    
+    // Allow camera to extend slightly beyond world bounds
+    const overflow = 0.2;
+    const minX = -effectiveViewportWidth * overflow;
+    const minY = -effectiveViewportHeight * overflow;
+    const maxX = WORLD_WIDTH - effectiveViewportWidth * (1 - overflow);
+    const maxY = WORLD_HEIGHT - effectiveViewportHeight * (1 - overflow);
+    
+    // Clamp target positions
+    targetCameraX = Math.max(minX, Math.min(targetCameraX, maxX));
+    targetCameraY = Math.max(minY, Math.min(targetCameraY, maxY));
+    
+    // Smoothly move camera towards target position
+    cameraX = lerp(cameraX, targetCameraX, CAMERA_MOVE_SPEED);
+    cameraY = lerp(cameraY, targetCameraY, CAMERA_MOVE_SPEED);
 }
 
 class Character {
@@ -133,6 +208,8 @@ class Character {
         this.isFlashing = false;
         this.flashTimeLeft = 0;
         this.FLASH_DURATION = 300;
+        this.isDropping = false;  // Add drop-through state
+        this.dropCooldown = 0;    // Add cooldown for dropping
     }
 
     canShoot() {
@@ -153,6 +230,11 @@ class Character {
     }
 
     update(timeScale, deltaTime) {
+        // Update drop cooldown
+        if (this.dropCooldown > 0) {
+            this.dropCooldown -= deltaTime;
+        }
+
         // Add debug logging for flash timing
         if (this.isFlashing) {
             this.flashTimeLeft -= deltaTime;
@@ -190,7 +272,7 @@ class Character {
         this.y += this.velocityY * timeScale;
         this.x += this.velocityX * timeScale;
 
-        // Platform collision
+        // Platform collision - modified to handle drop-through
         if (debugControls.platformCollision) {
             for (const platform of platforms) {
                 if (this.velocityY >= 0 && 
@@ -198,7 +280,8 @@ class Character {
                     this.x + this.width > platform.x && 
                     this.x < platform.x + platform.width &&
                     this.y + this.height > platform.y &&
-                    this.y < platform.y + platform.height) {
+                    this.y < platform.y + platform.height &&
+                    !this.isDropping) {  // Don't collide if dropping
                     
                     this.y = platform.y - this.height;
                     this.velocityY = 0;
@@ -208,6 +291,11 @@ class Character {
                     this.jumpHoldTime = 0;
                 }
             }
+        }
+
+        // Reset dropping state when not on platform and cooldown is over
+        if (this.isDropping && this.dropCooldown <= 0) {
+            this.isDropping = false;
         }
 
         // Floor collision - use WORLD_HEIGHT instead of canvas.height
@@ -327,6 +415,14 @@ class Character {
             this.velocityY = 0; // Zero vertical velocity during rush
         }
     }
+
+    drop() {
+        if (!this.isDropping && this.velocityY === 0) {  // Only drop if on platform
+            this.isDropping = true;
+            this.dropCooldown = 250;  // Set cooldown to prevent immediate re-landing
+            this.velocityY = 1;       // Small downward velocity to start falling
+        }
+    }
 }
 
 class Bullet {
@@ -336,6 +432,35 @@ class Bullet {
         this.radius = 4;
         this.velocityX = velocityX;
         this.owner = owner;
+        // Create a lighter version of the owner's color
+        this.color = this.lightenColor(owner.color, 50);  // 50% lighter
+    }
+
+    // Add method to lighten colors
+    lightenColor(color, percent) {
+        // Handle named colors
+        if (color === 'blue') color = '#0000FF';
+        if (color === 'red') color = '#FF0000';
+        if (color === 'green') color = '#008000';
+        if (color === 'purple') color = '#800080';
+        
+        // Convert to RGB
+        let hex = color.replace('#', '');
+        let r = parseInt(hex.substr(0, 2), 16);
+        let g = parseInt(hex.substr(2, 2), 16);
+        let b = parseInt(hex.substr(4, 2), 16);
+
+        // Make lighter
+        r = Math.min(255, Math.floor(r + (255 - r) * (percent / 100)));
+        g = Math.min(255, Math.floor(g + (255 - g) * (percent / 100)));
+        b = Math.min(255, Math.floor(b + (255 - b) * (percent / 100)));
+
+        // Convert back to hex
+        const rr = r.toString(16).padStart(2, '0');
+        const gg = g.toString(16).padStart(2, '0');
+        const bb = b.toString(16).padStart(2, '0');
+
+        return `#${rr}${gg}${bb}`;
     }
 
     update(timeScale) {
@@ -343,10 +468,16 @@ class Bullet {
     }
 
     draw() {
-        ctx.fillStyle = 'white';
+        ctx.fillStyle = this.color;
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
         ctx.fill();
+        
+        // Add a glowing effect
+        ctx.shadowColor = this.color;
+        ctx.shadowBlur = 6;
+        ctx.fill();
+        ctx.shadowBlur = 0;  // Reset shadow for other drawings
         ctx.closePath();
     }
 
@@ -472,6 +603,9 @@ document.addEventListener('keydown', (e) => {
     }
     if (e.key === 'k' || e.key === 'K') {
         player.rush();
+    }
+    if (e.key === 's' || e.key === 'S') {  // S key for dropping
+        player.drop();
     }
 });
 document.addEventListener('keyup', (e) => {
@@ -761,6 +895,12 @@ function gameLoop(timestamp) {
         updateCamera();
         ctx.clearRect(0, 0, VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
         ctx.save();
+        
+        // Apply zoom transformation
+        const zoomOffsetX = VIEWPORT_WIDTH * (1 - currentZoom) / 2;
+        const zoomOffsetY = VIEWPORT_HEIGHT * (1 - currentZoom) / 2;
+        ctx.translate(zoomOffsetX, zoomOffsetY);
+        ctx.scale(currentZoom, currentZoom);
         ctx.translate(-cameraX, -cameraY);
         
         // Draw sphere
