@@ -3,16 +3,27 @@ import Platform from './platform.js';
 import { Character, MOVE_SPEED } from './character.js';
 import { Bullet } from './bullet.js';
 import { DeathBurst } from './effects.js';
+import { Camera } from './camera.js';
+import { 
+    debugControls, 
+    performanceMetrics, 
+    calculateFPS, 
+    initializeDebugControls,
+    drawFPS 
+} from './debug.js';
+import { InputHandler } from './input.js';
+import { Minimap } from './minimap.js';
 
 // Initialize variables at the top
 let canvas, ctx, healthDisplay;
 let player, enemies, bullets;
 let gameOver = false;
 let sphereRadius;
-let cameraX = 0;
-let cameraY = 0;
 let centerX, centerY, safeRadius;
 let effects = []; // Array to hold active effects
+let camera; // Add camera variable
+let inputHandler; // Add input handler variable
+let minimap; // Add minimap variable
 
 // Game constants
 const WORLD_WIDTH = 1280 * 3;
@@ -25,182 +36,9 @@ const MINIMAP_HEIGHT = 150;
 const MINIMAP_MARGIN = 10;
 const SPHERE_SHRINK_RATE = 0.5;
 
-// Add camera constants near other game constants
-const DEFAULT_ZOOM = 1.0;
-const MAX_ZOOM_OUT = 0.7;  // How far we can zoom out (smaller number = more zoomed out)
-const BASE_CAMERA_BUFFER_PERCENT = 0.2;  // Base buffer at default zoom
-const MIN_CAMERA_BUFFER_PERCENT = 0.1;   // Minimum buffer when zoomed out
-const ZOOM_SPEED = 0.03;  // Reduced from 0.05 for smoother zoom
-const CAMERA_MOVE_SPEED = 0.05;  // How fast the camera pans
-
-// Add camera state variables
-let currentZoom = DEFAULT_ZOOM;
-let targetZoom = DEFAULT_ZOOM;
-let targetCameraX = 0;
-let targetCameraY = 0;
-
 // Game state
-let frameCount = 0;
-let lastFpsTime = Date.now();
-let currentFps = 0;
-let frameTime = 0;
 let lastFrameTime = 0;
 const TARGET_FRAME_TIME = 1000/60;
-
-// Add debug control variables
-const debugControls = {
-    ai: true,
-    minimap: true,
-    sphere: true,
-    platformCollision: true,
-    bulletCollision: true,
-    enemyAvoidance: true,
-    debugBounds: true
-};
-
-// Add event listeners for debug controls
-document.getElementById('toggle-ai').addEventListener('change', (e) => {
-    debugControls.ai = e.target.checked;
-    e.target.blur();  // Remove focus
-});
-document.getElementById('toggle-minimap').addEventListener('change', (e) => {
-    debugControls.minimap = e.target.checked;
-    e.target.blur();  // Remove focus
-});
-document.getElementById('toggle-sphere').addEventListener('change', (e) => {
-    debugControls.sphere = e.target.checked;
-    e.target.blur();  // Remove focus
-});
-document.getElementById('toggle-platform-collision').addEventListener('change', (e) => {
-    debugControls.platformCollision = e.target.checked;
-    e.target.blur();  // Remove focus
-});
-document.getElementById('toggle-bullet-collision').addEventListener('change', (e) => {
-    debugControls.bulletCollision = e.target.checked;
-    e.target.blur();  // Remove focus
-});
-document.getElementById('toggle-enemy-avoidance').addEventListener('change', (e) => {
-    debugControls.enemyAvoidance = e.target.checked;
-    e.target.blur();  // Remove focus
-});
-document.getElementById('toggle-debug-bounds').addEventListener('change', (e) => {
-    debugControls.debugBounds = e.target.checked;
-    e.target.blur();  // Remove focus
-});
-
-// Add this function to calculate FPS
-function calculateFPS() {
-    frameCount++;
-    const currentTime = Date.now();
-    const timeDiff = currentTime - lastFpsTime;
-    
-    // Update FPS every second
-    if (timeDiff >= 1000) {
-        currentFps = Math.round((frameCount * 1000) / timeDiff);
-        frameCount = 0;
-        lastFpsTime = currentTime;
-    }
-}
-
-function lerp(start, end, t) {
-    return start + (end - start) * t;
-}
-
-// Add this function to handle camera movement
-function updateCamera() {
-    // Calculate base camera position (centered on player)
-    const targetX = player.x - VIEWPORT_WIDTH/2;
-    const targetY = player.y - VIEWPORT_HEIGHT/2;
-    
-    // Calculate dynamic buffer based on current zoom
-    const zoomFactor = (currentZoom - MAX_ZOOM_OUT) / (DEFAULT_ZOOM - MAX_ZOOM_OUT);
-    const dynamicBuffer = MIN_CAMERA_BUFFER_PERCENT + 
-                         (BASE_CAMERA_BUFFER_PERCENT - MIN_CAMERA_BUFFER_PERCENT) * zoomFactor;
-    
-    // Check for nearby enemies with dynamic buffer
-    let nearbyEnemies = enemies.filter(enemy => {
-        const dx = Math.abs(enemy.x - player.x);
-        const dy = Math.abs(enemy.y - player.y);
-        return dx < VIEWPORT_WIDTH * (1 + dynamicBuffer) &&
-               dy < VIEWPORT_HEIGHT * (1 + dynamicBuffer);
-    });
-    
-    // Calculate target zoom based on nearby enemies
-    if (nearbyEnemies.length > 0) {
-        // Find the bounds of all relevant characters
-        let minX = player.x, maxX = player.x;
-        let minY = player.y, maxY = player.y;
-        let totalX = player.x;
-        let totalY = player.y;
-        let characterCount = 1;
-        
-        nearbyEnemies.forEach(enemy => {
-            minX = Math.min(minX, enemy.x);
-            maxX = Math.max(maxX, enemy.x);
-            minY = Math.min(minY, enemy.y);
-            maxY = Math.max(maxY, enemy.y);
-            totalX += enemy.x;
-            totalY += enemy.y;
-            characterCount++;
-        });
-        
-        // Calculate required zoom to fit all characters
-        const width = maxX - minX + 200;
-        const height = maxY - minY + 200;
-        const zoomX = VIEWPORT_WIDTH / width;
-        const zoomY = VIEWPORT_HEIGHT / height;
-        targetZoom = Math.max(Math.min(zoomX, zoomY, DEFAULT_ZOOM), MAX_ZOOM_OUT);
-        
-        // Set target camera position to center of action
-        const avgX = totalX / characterCount;
-        const avgY = totalY / characterCount;
-        
-        targetCameraX = avgX - VIEWPORT_WIDTH/(2 * currentZoom);
-        targetCameraY = avgY - VIEWPORT_HEIGHT/(2 * currentZoom);
-    } else {
-        // Return to default zoom and center on player
-        targetZoom = DEFAULT_ZOOM;
-        targetCameraX = targetX;
-        targetCameraY = targetY;
-    }
-    
-    // Smoothly interpolate zoom and position
-    currentZoom = lerp(currentZoom, targetZoom, ZOOM_SPEED);
-    
-    // Calculate effective viewport dimensions with current zoom
-    const effectiveViewportWidth = VIEWPORT_WIDTH / currentZoom;
-    const effectiveViewportHeight = VIEWPORT_HEIGHT / currentZoom;
-    
-    // Allow camera to extend slightly beyond world bounds
-    const overflow = 0.2;
-    const minX = -effectiveViewportWidth * overflow;
-    const minY = -effectiveViewportHeight * overflow;
-    const maxX = WORLD_WIDTH - effectiveViewportWidth * (1 - overflow);
-    const maxY = WORLD_HEIGHT - effectiveViewportHeight * (1 - overflow);
-    
-    // Clamp target positions
-    targetCameraX = Math.max(minX, Math.min(targetCameraX, maxX));
-    targetCameraY = Math.max(minY, Math.min(targetCameraY, maxY));
-    
-    // Smoothly move camera towards target position
-    cameraX = lerp(cameraX, targetCameraX, CAMERA_MOVE_SPEED);
-    cameraY = lerp(cameraY, targetCameraY, CAMERA_MOVE_SPEED);
-}
-
-// Add collision utility functions near the top with other utility functions
-function checkCollision(rect1, rect2) {
-    return rect1.x + rect1.width > rect2.x &&
-           rect1.x < rect2.x + rect2.width &&
-           rect1.y + rect1.height > rect2.y &&
-           rect1.y < rect2.y + rect2.height;
-}
-
-function checkPlatformCollision(character, platform, previousY) {
-    return character.velocityY >= 0 && 
-           previousY + character.height <= platform.y &&
-           checkCollision(character, platform) &&
-           !character.isDropping;
-}
 
 // Create platforms array after centerX is initialized
 let platforms = [];
@@ -280,50 +118,6 @@ function createPlatforms() {
         new Platform(centerX - 100, WORLD_HEIGHT - 150, 200),
         new Platform(centerX + 100, WORLD_HEIGHT - 150, 200)
     ];
-}
-
-// Input handling
-const keys = {};
-document.addEventListener('keydown', (e) => {
-    keys[e.key] = true;
-    if (e.key === ' ') {  // Spacebar for jumping
-        player.jump();
-    }
-    if (e.key === 'k' || e.key === 'K') {
-        player.rush();
-    }
-    if (e.key === 's' || e.key === 'S') {  // S key for dropping
-        player.drop();
-    }
-});
-document.addEventListener('keyup', (e) => {
-    keys[e.key] = false;
-    // Cut jump short if spacebar is released
-    if (e.key === ' ' && player.velocityY < 0) {
-        player.velocityY *= 0.5;
-    }
-});
-
-function updatePlayer(timeScale) {
-    if (!player.isRushing) {
-        if (keys['a'] || keys['A']) {
-            player.velocityX = -MOVE_SPEED * timeScale;
-            player.direction = -1;
-        } else if (keys['d'] || keys['D']) {
-            player.velocityX = MOVE_SPEED * timeScale;
-            player.direction = 1;
-        } else {
-            player.velocityX = 0;
-        }
-    }
-
-    // Handle continuous shooting with O key
-    if ((keys['o'] || keys['O']) && player.canShoot()) {
-        const bulletData = player.shoot();
-        if (bulletData) {
-            bullets.push(new Bullet(bulletData.x, bulletData.y, bulletData.direction, bulletData.owner));
-        }
-    }
 }
 
 function updateAI(timeScale, deltaTime) {
@@ -469,7 +263,7 @@ function updateAI(timeScale, deltaTime) {
         }
 
         // Update enemy physics
-        enemy.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, keys, endGame);
+        enemy.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, inputHandler.isKeyPressed.bind(inputHandler), endGame);
     });
 }
 
@@ -507,76 +301,6 @@ function restartGame() {
 // Add restartGame to window object
 window.restartGame = restartGame;
 
-function drawMinimap() {
-    const mapX = VIEWPORT_WIDTH - MINIMAP_WIDTH - MINIMAP_MARGIN;
-    const mapY = MINIMAP_MARGIN;
-    
-    // Draw minimap background
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.fillRect(mapX, mapY, MINIMAP_WIDTH, MINIMAP_HEIGHT);
-    
-    // Draw minimap border
-    ctx.strokeStyle = 'white';
-    ctx.strokeRect(mapX, mapY, MINIMAP_WIDTH, MINIMAP_HEIGHT);
-    
-    // Calculate scale factors
-    const scaleX = MINIMAP_WIDTH / WORLD_WIDTH;
-    const scaleY = MINIMAP_HEIGHT / WORLD_HEIGHT;
-    
-    // Draw platforms
-    ctx.fillStyle = '#666';
-    platforms.forEach(platform => {
-        ctx.fillRect(
-            mapX + platform.x * scaleX,
-            mapY + platform.y * scaleY,
-            platform.width * scaleX,
-            platform.height * scaleY
-        );
-    });
-    
-    // Draw player (blue square)
-    const playerSize = 4;
-    ctx.fillStyle = 'blue';
-    ctx.fillRect(
-        mapX + player.x * scaleX,
-        mapY + player.y * scaleY,
-        playerSize,
-        playerSize
-    );
-    
-    // Draw enemies (colored squares)
-    enemies.forEach(enemy => {
-        ctx.fillStyle = enemy.color;
-        ctx.fillRect(
-            mapX + enemy.x * scaleX,
-            mapY + enemy.y * scaleY,
-            playerSize,
-            playerSize
-        );
-    });
-    
-    // Draw sphere boundary
-    ctx.beginPath();
-    ctx.arc(
-        mapX + (WORLD_WIDTH/2) * scaleX,
-        mapY + (WORLD_HEIGHT/2) * scaleY,
-        sphereRadius * scaleX,
-        0,
-        Math.PI * 2
-    );
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-    ctx.stroke();
-}
-
-// Add performance monitoring variables
-const performanceMetrics = {
-    update: 0,
-    draw: 0,
-    ai: 0,
-    bullets: 0,
-    total: 0
-};
-
 function gameLoop(timestamp) {
     // Calculate delta time
     if (!lastFrameTime) lastFrameTime = timestamp;
@@ -585,16 +309,12 @@ function gameLoop(timestamp) {
     lastFrameTime = timestamp;
     
     if (!gameOver) {
-        updateCamera();
+        camera.update(player, enemies);
         ctx.clearRect(0, 0, VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
         ctx.save();
         
-        // Apply zoom transformation
-        const zoomOffsetX = VIEWPORT_WIDTH * (1 - currentZoom) / 2;
-        const zoomOffsetY = VIEWPORT_HEIGHT * (1 - currentZoom) / 2;
-        ctx.translate(zoomOffsetX, zoomOffsetY);
-        ctx.scale(currentZoom, currentZoom);
-        ctx.translate(-cameraX, -cameraY);
+        // Apply camera transform
+        camera.applyTransform(ctx);
         
         // Draw sphere
         if (debugControls.sphere) {
@@ -620,15 +340,15 @@ function gameLoop(timestamp) {
         });
         
         // Update game objects
-        updatePlayer(timeScale);
-        player.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, keys, endGame);
+        inputHandler.update(timeScale, player, bullets, Bullet);  // Update input
+        player.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, inputHandler.isKeyPressed.bind(inputHandler), endGame);
         if (!player.isDead) {
             player.draw(ctx);
         }
         
         updateAI(timeScale, deltaTime);
         enemies.forEach(enemy => {
-            enemy.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, keys, endGame);
+            enemy.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, inputHandler.isKeyPressed.bind(inputHandler), endGame);
             
             // Only hide the character if they're dead AND their death effect is gone
             const deathEffect = enemy.isDead ? effects.find(effect => {
@@ -723,23 +443,21 @@ function gameLoop(timestamp) {
         
         // UI updates
         healthDisplay.textContent = `❤️ ${player.hearts}`;
-        calculateFPS();
+        const fps = calculateFPS();
         
         // Draw FPS counter
-        ctx.fillStyle = 'white';
-        ctx.font = '12px Arial';
-        ctx.fillText(`FPS: ${currentFps}`, 110, 20);
+        drawFPS(ctx, 110, 20);
         
         // Draw minimap if enabled
         if (debugControls.minimap) {
-            drawMinimap();
+            minimap.draw(ctx, VIEWPORT_WIDTH, player, enemies, platforms, sphereRadius);
         }
     }
     
     requestAnimationFrame(gameLoop);
 }
 
-// Move initialization into a function
+// Update initialization
 function initializeGame() {
     // Initialize sphere radius (reduced from 9x to 4x)
     sphereRadius = Math.min(canvas.width, canvas.height) * 3;
@@ -752,6 +470,12 @@ function initializeGame() {
     // Create platforms
     createPlatforms();
     
+    // Initialize camera
+    camera = new Camera(VIEWPORT_WIDTH, VIEWPORT_HEIGHT, WORLD_WIDTH, WORLD_HEIGHT);
+    
+    // Initialize minimap
+    minimap = new Minimap(MINIMAP_WIDTH, MINIMAP_HEIGHT, MINIMAP_MARGIN, WORLD_WIDTH, WORLD_HEIGHT);
+    
     // Spawn player in bottom-left corner
     player = new Character(
         200,
@@ -759,6 +483,9 @@ function initializeGame() {
         'blue',
         true
     );
+    
+    // Initialize input handler
+    inputHandler = new InputHandler(player);
     
     // Spawn enemies in other corners
     enemies = [
@@ -786,6 +513,9 @@ window.onload = function() {
     // Set canvas size
     canvas.width = 1280;
     canvas.height = 720;
+    
+    // Initialize debug controls
+    initializeDebugControls();
     
     // Initialize game objects
     initializeGame();
