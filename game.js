@@ -13,6 +13,7 @@ import {
 } from './debug.js';
 import { InputHandler } from './input.js';
 import { Minimap } from './minimap.js';
+import { maps } from './maps.js';
 
 // Initialize variables at the top
 let canvas, ctx, healthDisplay;
@@ -24,6 +25,7 @@ let effects = []; // Array to hold active effects
 let camera; // Add camera variable
 let inputHandler; // Add input handler variable
 let minimap; // Add minimap variable
+let currentMap = 'default'; // Track current map
 
 // Game constants
 const WORLD_WIDTH = 1280 * 3;
@@ -47,77 +49,19 @@ function createPlatforms() {
     centerX = WORLD_WIDTH / 2;
     centerY = WORLD_HEIGHT / 2;
     
-    platforms = [
-        // Bottom left corner area
-        new Platform(100, WORLD_HEIGHT - 200, 300),
-        new Platform(500, WORLD_HEIGHT - 300, 300),
-        new Platform(200, WORLD_HEIGHT - 400, 300),
-        new Platform(400, WORLD_HEIGHT - 500, 300),
-        new Platform(100, WORLD_HEIGHT - 600, 300),
-        
-        // Bottom right corner area
-        new Platform(WORLD_WIDTH - 400, WORLD_HEIGHT - 200, 300),
-        new Platform(WORLD_WIDTH - 800, WORLD_HEIGHT - 300, 300),
-        new Platform(WORLD_WIDTH - 500, WORLD_HEIGHT - 400, 300),
-        new Platform(WORLD_WIDTH - 300, WORLD_HEIGHT - 500, 300),
-        new Platform(WORLD_WIDTH - 600, WORLD_HEIGHT - 600, 300),
-        
-        // Top left corner area
-        new Platform(100, 200, 300),
-        new Platform(500, 300, 300),
-        new Platform(200, 400, 300),
-        new Platform(400, 500, 300),
-        new Platform(100, 600, 300),
-        
-        // Top right corner area
-        new Platform(WORLD_WIDTH - 400, 200, 300),
-        new Platform(WORLD_WIDTH - 800, 300, 300),
-        new Platform(WORLD_WIDTH - 500, 400, 300),
-        new Platform(WORLD_WIDTH - 300, 500, 300),
-        new Platform(WORLD_WIDTH - 600, 600, 300),
-        
-        // Center area platforms - create a dense center area
-        new Platform(centerX - 400, centerY, 300),
-        new Platform(centerX + 100, centerY, 300),
-        new Platform(centerX - 150, centerY - 200, 300),
-        new Platform(centerX - 150, centerY + 200, 300),
-        new Platform(centerX - 300, centerY - 100, 300),
-        new Platform(centerX + 300, centerY + 100, 300),
-        
-        // Mid-level connecting platforms
-        new Platform(centerX - 800, centerY - 100, 300),
-        new Platform(centerX + 500, centerY - 100, 300),
-        new Platform(centerX - 800, centerY + 100, 300),
-        new Platform(centerX + 500, centerY + 100, 300),
-        new Platform(centerX - 600, centerY, 300),
-        new Platform(centerX + 600, centerY, 300),
-        
-        // Additional vertical movement platforms
-        new Platform(centerX - 600, centerY - 300, 200),
-        new Platform(centerX + 400, centerY - 300, 200),
-        new Platform(centerX - 600, centerY + 300, 200),
-        new Platform(centerX + 400, centerY + 300, 200),
-        new Platform(centerX - 200, centerY - 400, 200),
-        new Platform(centerX + 200, centerY + 400, 200),
-        
-        // Small platforms for precise jumping
-        new Platform(centerX - 300, centerY - 250, 100),
-        new Platform(centerX + 300, centerY + 250, 100),
-        new Platform(centerX, centerY - 350, 100),
-        new Platform(centerX, centerY + 350, 100),
-        
-        // Diagonal paths
-        new Platform(centerX - 400, centerY - 400, 200),
-        new Platform(centerX + 400, centerY + 400, 200),
-        new Platform(centerX - 200, centerY - 200, 200),
-        new Platform(centerX + 200, centerY + 200, 200),
-        
-        // High platforms for vertical gameplay
-        new Platform(centerX - 100, 150, 200),
-        new Platform(centerX + 100, 150, 200),
-        new Platform(centerX - 100, WORLD_HEIGHT - 150, 200),
-        new Platform(centerX + 100, WORLD_HEIGHT - 150, 200)
-    ];
+    // Get platform definitions from current map
+    const platformDefs = maps[currentMap].createPlatforms(WORLD_WIDTH, WORLD_HEIGHT);
+    
+    // Convert platform definitions to Platform instances
+    platforms = platformDefs.map(def => new Platform(def.x, def.y, def.width));
+}
+
+// Add map change handler
+function changeMap(mapId) {
+    currentMap = mapId;
+    createPlatforms();
+    // Reset player and enemies to appropriate positions
+    initializeGame();
 }
 
 function updateAI(timeScale, deltaTime) {
@@ -263,7 +207,7 @@ function updateAI(timeScale, deltaTime) {
         }
 
         // Update enemy physics
-        enemy.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, inputHandler.isKeyPressed.bind(inputHandler), endGame);
+        enemy.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, inputHandler.isKeyPressed.bind(inputHandler), endGame, DeathBurst, effects);
     });
 }
 
@@ -273,29 +217,7 @@ function endGame() {
 }
 
 function restartGame() {
-    gameOver = false;
-    document.getElementById('game-over').classList.add('hidden');
-    
-    // Reset player
-    player.x = centerX - safeRadius/2;
-    player.y = canvas.height - 100;
-    player.hearts = MAX_HEARTS;
-    player.velocityX = 0;
-    player.velocityY = 0;
-    
-    // Reset enemies array with new enemy instances
-    enemies.length = 0; // Clear the array
-    enemies.push(
-        new Character(centerX + safeRadius/2, canvas.height - 100, 'red'),
-        new Character(centerX, canvas.height - 200, 'green'),
-        new Character(centerX + safeRadius/3, canvas.height - 100, 'purple')
-    );
-    
-    // Reset sphere
-    sphereRadius = Math.min(canvas.width, canvas.height) * 9;  // 9x bigger
-    
-    // Clear bullets
-    bullets = [];
+    initializeGame();
 }
 
 // Add restartGame to window object
@@ -341,14 +263,14 @@ function gameLoop(timestamp) {
         
         // Update game objects
         inputHandler.update(timeScale, player, bullets, Bullet);  // Update input
-        player.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, inputHandler.isKeyPressed.bind(inputHandler), endGame);
+        player.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, inputHandler.isKeyPressed.bind(inputHandler), endGame, DeathBurst, effects);
         if (!player.isDead) {
             player.draw(ctx);
         }
         
         updateAI(timeScale, deltaTime);
         enemies.forEach(enemy => {
-            enemy.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, inputHandler.isKeyPressed.bind(inputHandler), endGame);
+            enemy.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, inputHandler.isKeyPressed.bind(inputHandler), endGame, DeathBurst, effects);
             
             // Only hide the character if they're dead AND their death effect is gone
             const deathEffect = enemy.isDead ? effects.find(effect => {
@@ -459,6 +381,10 @@ function gameLoop(timestamp) {
 
 // Update initialization
 function initializeGame() {
+    // Reset game state
+    gameOver = false;
+    document.getElementById('game-over').classList.add('hidden');
+    
     // Initialize sphere radius (reduced from 9x to 4x)
     sphereRadius = Math.min(canvas.width, canvas.height) * 3;
     
@@ -496,9 +422,6 @@ function initializeGame() {
     
     bullets = [];
     effects = []; // Initialize effects array
-    
-    // Make sure game-over is hidden at start
-    document.getElementById('game-over').classList.add('hidden');
 }
 
 // Update window.onload
@@ -516,6 +439,29 @@ window.onload = function() {
     
     // Initialize debug controls
     initializeDebugControls();
+    
+    // Add map selection handler
+    document.getElementById('map-select').addEventListener('change', (e) => {
+        changeMap(e.target.value);
+        e.target.blur();  // Remove focus
+    });
+    
+    // Add reset button handler
+    document.getElementById('reset-button').addEventListener('click', (e) => {
+        initializeGame();
+        e.target.blur();  // Remove focus
+    });
+    
+    // Add keyboard shortcut for reset
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'r' || e.key === 'R') {
+            initializeGame();
+            // Also blur any active element to prevent spacebar from triggering buttons
+            if (document.activeElement) {
+                document.activeElement.blur();
+            }
+        }
+    });
     
     // Initialize game objects
     initializeGame();

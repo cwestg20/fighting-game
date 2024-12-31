@@ -71,7 +71,7 @@ class Character {
         return false;
     }
 
-    update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, keys, endGame) {
+    update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, keys, endGame, DeathBurst, effects) {
         if (this.dropCooldown > 0) {
             this.dropCooldown -= deltaTime;
         }
@@ -148,8 +148,18 @@ class Character {
         if (distanceFromCenter > sphereRadius && 
             currentTime - this.lastDamageTime >= this.damageInterval) {
             if (this.takeDamage()) {
-                if (this.hearts <= 0 && this.isPlayer) {
-                    endGame();
+                if (this.hearts <= 0 && !this.isDead) {
+                    this.isDead = true;
+                    if (DeathBurst && effects) {
+                        effects.push(new DeathBurst(
+                            this.x + this.width/2,
+                            this.y + this.height/2,
+                            this.color
+                        ));
+                    }
+                    if (this.isPlayer) {
+                        endGame();
+                    }
                 }
             }
         }

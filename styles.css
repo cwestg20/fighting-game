@@ -105,15 +105,20 @@ body {
 
 .debug-section {
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
     gap: 15px;
-    align-items: center;
 }
 
 .debug-section h3 {
     color: white;
     margin: 0;
-    margin-right: 20px;
+}
+
+.control-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    align-items: center;
 }
 
 .debug-section label {
@@ -126,4 +131,40 @@ body {
 
 .debug-section input[type="checkbox"] {
     cursor: pointer;
+}
+
+.debug-section select {
+    background: #444;
+    color: white;
+    border: 1px solid #555;
+    padding: 3px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+}
+
+.debug-section select:hover {
+    background: #555;
+}
+
+.debug-section select:focus {
+    outline: none;
+    border-color: #666;
+}
+
+.debug-section button {
+    background: #4CAF50;
+    color: white;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 14px;
+}
+
+.debug-section button:hover {
+    background: #45a049;
+}
+
+.debug-section button:active {
+    background: #3d8b40;
 } 

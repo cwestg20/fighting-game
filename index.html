@@ -18,13 +18,25 @@
     <div id="debug-controls">
         <div class="debug-section">
             <h3>Debug Controls</h3>
-            <label><input type="checkbox" id="toggle-ai" checked tabindex="-1"> Enable AI</label>
-            <label><input type="checkbox" id="toggle-minimap" checked tabindex="-1"> Show Minimap</label>
-            <label><input type="checkbox" id="toggle-sphere" checked tabindex="-1"> Show Sphere</label>
-            <label><input type="checkbox" id="toggle-platform-collision" checked tabindex="-1"> Platform Collision</label>
-            <label><input type="checkbox" id="toggle-bullet-collision" checked tabindex="-1"> Bullet Collision</label>
-            <label><input type="checkbox" id="toggle-enemy-avoidance" checked tabindex="-1"> Enemy Avoidance</label>
-            <label><input type="checkbox" id="toggle-debug-bounds" checked tabindex="-1"> Show Debug Bounds</label>
+            <div class="control-row">
+                <label>
+                    Map:
+                    <select id="map-select" tabindex="-1">
+                        <option value="default">Default Arena</option>
+                        <option value="empty">Empty Arena</option>
+                    </select>
+                </label>
+                <button id="reset-button" tabindex="-1">Reset Game (R)</button>
+            </div>
+            <div class="control-row">
+                <label><input type="checkbox" id="toggle-ai" checked tabindex="-1"> Enable AI</label>
+                <label><input type="checkbox" id="toggle-minimap" checked tabindex="-1"> Show Minimap</label>
+                <label><input type="checkbox" id="toggle-sphere" checked tabindex="-1"> Show Sphere</label>
+                <label><input type="checkbox" id="toggle-platform-collision" checked tabindex="-1"> Platform Collision</label>
+                <label><input type="checkbox" id="toggle-bullet-collision" checked tabindex="-1"> Bullet Collision</label>
+                <label><input type="checkbox" id="toggle-enemy-avoidance" checked tabindex="-1"> Enemy Avoidance</label>
+                <label><input type="checkbox" id="toggle-debug-bounds" checked tabindex="-1"> Show Debug Bounds</label>
+            </div>
         </div>
     </div>
     <script src="game.js" type="module"></script>
