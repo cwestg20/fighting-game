@@ -51,6 +51,7 @@ class Character {
         this.FLASH_DURATION = 300;
         this.isDropping = false;
         this.dropCooldown = 0;
+        this.isDead = false;
     }
 
     canShoot() {
@@ -61,6 +62,7 @@ class Character {
         const currentTime = Date.now();
         if (!this.isFlashing && currentTime - this.lastDamageTime >= this.damageInterval) {
             this.hearts--;
+            console.log('Character took damage:', this.color, 'Hearts remaining:', this.hearts);
             this.isFlashing = true;
             this.flashTimeLeft = this.FLASH_DURATION;
             this.lastDamageTime = currentTime;
@@ -154,6 +156,8 @@ class Character {
     }
 
     draw(ctx) {
+        // Don't draw if dead (handled in game loop now)
+        
         if (this.isRushing) {
             ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
             ctx.fillRect(this.x - this.direction * 20, this.y, 20, this.height);

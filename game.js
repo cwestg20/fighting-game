@@ -2,6 +2,7 @@
 import Platform from './platform.js';
 import { Character, MOVE_SPEED } from './character.js';
 import { Bullet } from './bullet.js';
+import { DeathBurst } from './effects.js';
 
 // Initialize variables at the top
 let canvas, ctx, healthDisplay;
@@ -11,6 +12,7 @@ let sphereRadius;
 let cameraX = 0;
 let cameraY = 0;
 let centerX, centerY, safeRadius;
+let effects = []; // Array to hold active effects
 
 // Game constants
 const WORLD_WIDTH = 1280 * 3;
@@ -59,24 +61,31 @@ const debugControls = {
 // Add event listeners for debug controls
 document.getElementById('toggle-ai').addEventListener('change', (e) => {
     debugControls.ai = e.target.checked;
+    e.target.blur();  // Remove focus
 });
 document.getElementById('toggle-minimap').addEventListener('change', (e) => {
     debugControls.minimap = e.target.checked;
+    e.target.blur();  // Remove focus
 });
 document.getElementById('toggle-sphere').addEventListener('change', (e) => {
     debugControls.sphere = e.target.checked;
+    e.target.blur();  // Remove focus
 });
 document.getElementById('toggle-platform-collision').addEventListener('change', (e) => {
     debugControls.platformCollision = e.target.checked;
+    e.target.blur();  // Remove focus
 });
 document.getElementById('toggle-bullet-collision').addEventListener('change', (e) => {
     debugControls.bulletCollision = e.target.checked;
+    e.target.blur();  // Remove focus
 });
 document.getElementById('toggle-enemy-avoidance').addEventListener('change', (e) => {
     debugControls.enemyAvoidance = e.target.checked;
+    e.target.blur();  // Remove focus
 });
 document.getElementById('toggle-debug-bounds').addEventListener('change', (e) => {
     debugControls.debugBounds = e.target.checked;
+    e.target.blur();  // Remove focus
 });
 
 // Add this function to calculate FPS
@@ -599,15 +608,48 @@ function gameLoop(timestamp) {
         // Draw platforms
         platforms.forEach(platform => platform.draw(ctx));
         
+        // Update and draw effects first
+        effects = effects.filter(effect => {
+            effect.update();
+            effect.draw(ctx);
+            const isAlive = effect.particles.length > 0;
+            if (!isAlive) {
+                console.log('Effect removed - no particles left');
+            }
+            return isAlive;
+        });
+        
         // Update game objects
         updatePlayer(timeScale);
         player.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, keys, endGame);
-        player.draw(ctx);
+        if (!player.isDead) {
+            player.draw(ctx);
+        }
         
         updateAI(timeScale, deltaTime);
         enemies.forEach(enemy => {
             enemy.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, keys, endGame);
-            enemy.draw(ctx);
+            
+            // Only hide the character if they're dead AND their death effect is gone
+            const deathEffect = enemy.isDead ? effects.find(effect => {
+                const matches = effect instanceof DeathBurst && 
+                    Math.abs(effect.x - (enemy.x + enemy.width/2)) < 50 &&
+                    Math.abs(effect.y - (enemy.y + enemy.height/2)) < 50;
+                if (enemy.isDead && matches) {
+                    console.log('Found matching death effect, particles:', effect.particles.length);
+                }
+                return matches;
+            }) : null;
+            
+            const shouldDraw = !enemy.isDead || (deathEffect && deathEffect.particles.length > 0);
+            if (enemy.isDead) {
+                console.log('Enemy is dead, shouldDraw:', shouldDraw, 
+                    'hasDeathEffect:', !!deathEffect, 
+                    'particleCount:', deathEffect?.particles.length || 0);
+            }
+            if (shouldDraw) {
+                enemy.draw(ctx);
+            }
         });
         
         // Update bullets with timeScale
@@ -621,6 +663,8 @@ function gameLoop(timestamp) {
                     if (player.takeDamage()) {
                         hit = true;
                         if (player.hearts <= 0) {
+                            player.isDead = true;
+                            effects.push(new DeathBurst(player.x + player.width/2, player.y + player.height/2, player.color));
                             endGame();
                         }
                     }
@@ -628,10 +672,19 @@ function gameLoop(timestamp) {
                 
                 enemies.forEach((enemy, index) => {
                     if (bullet.checkCollision(enemy)) {
+                        console.log('Processing bullet collision with enemy:', enemy.color);
                         if (enemy.takeDamage()) {
                             hit = true;
-                            if (enemy.hearts <= 0) {
-                                enemies.splice(index, 1);
+                            if (enemy.hearts <= 0 && !enemy.isDead) {
+                                console.log('Enemy died:', enemy.color);
+                                enemy.isDead = true;
+                                console.log('Creating death effect at:', enemy.x + enemy.width/2, enemy.y + enemy.height/2);
+                                effects.push(new DeathBurst(
+                                    enemy.x + enemy.width/2, 
+                                    enemy.y + enemy.height/2, 
+                                    enemy.color
+                                ));
+                                console.log('Effects array length after adding:', effects.length);
                             }
                         }
                     }
@@ -640,6 +693,31 @@ function gameLoop(timestamp) {
             
             return !hit && bullet.x > 0 && bullet.x < WORLD_WIDTH;
         });
+        
+        // Remove dead enemies after their death animation completes
+        const beforeFilterCount = enemies.length;
+        enemies = enemies.filter(enemy => {
+            if (enemy.isDead) {
+                console.log('Checking dead enemy:', enemy.color);
+                // Find the death effect for this enemy
+                const deathEffect = effects.find(effect => {
+                    const matches = effect instanceof DeathBurst && 
+                        Math.abs(effect.x - (enemy.x + enemy.width/2)) < 50 &&
+                        Math.abs(effect.y - (enemy.y + enemy.height/2)) < 50;
+                    if (matches) {
+                        console.log('Found matching death effect for', enemy.color, 'with', effect.particles.length, 'particles');
+                    }
+                    return matches;
+                });
+                const keepEnemy = deathEffect && deathEffect.particles.length > 0;
+                console.log('Decision for', enemy.color, '- Keep enemy:', keepEnemy);
+                return keepEnemy;
+            }
+            return true;
+        });
+        if (beforeFilterCount !== enemies.length) {
+            console.log('Enemies filtered from', beforeFilterCount, 'to', enemies.length);
+        }
         
         ctx.restore();
         
@@ -690,6 +768,7 @@ function initializeGame() {
     ];
     
     bullets = [];
+    effects = []; // Initialize effects array
     
     // Make sure game-over is hidden at start
     document.getElementById('game-over').classList.add('hidden');
@@ -697,6 +776,8 @@ function initializeGame() {
 
 // Update window.onload
 window.onload = function() {
+    console.log('Game starting...');
+    
     // Initialize canvas and context
     canvas = document.getElementById('gameCanvas');
     ctx = canvas.getContext('2d');

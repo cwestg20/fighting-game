@@ -77,7 +77,11 @@ class Bullet {
             height: this.radius * 2
         };
 
-        return checkCollision(bulletRect, character);
+        const hasCollision = checkCollision(bulletRect, character);
+        if (hasCollision) {
+            console.log('Bullet hit character:', character.color, 'Hearts:', character.hearts);
+        }
+        return hasCollision;
     }
 }
 
