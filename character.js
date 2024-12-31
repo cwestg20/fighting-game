@@ -1,3 +1,5 @@
+import { debugControls } from './debug.js';
+
 // Game constants needed by Character
 const GRAVITY = 0.6;
 const JUMP_FORCE = -10.2;
@@ -43,15 +45,21 @@ class Character {
         this.isPlayer = isPlayer;
         this.direction = 1;
         this.lastDamageTime = 0;
-        this.damageInterval = 1000;
-        this.lastShootTime = 0;
-        this.rushVelocityY = 0;
+        this.FLASH_DURATION = 900;
         this.isFlashing = false;
         this.flashTimeLeft = 0;
-        this.FLASH_DURATION = 300;
+        this.lastShootTime = 0;
+        this.rushVelocityY = 0;
         this.isDropping = false;
         this.dropCooldown = 0;
         this.isDead = false;
+        
+        // Initialize movement goal for AI
+        this.movementGoal = {
+            x: x,
+            y: y,
+            timeLeft: 120
+        };
     }
 
     canShoot() {
@@ -60,12 +68,18 @@ class Character {
 
     takeDamage() {
         const currentTime = Date.now();
-        if (!this.isFlashing && currentTime - this.lastDamageTime >= this.damageInterval) {
+        if (!this.isFlashing && currentTime - this.lastDamageTime >= this.FLASH_DURATION) {
             this.hearts--;
             console.log('Character took damage:', this.color, 'Hearts remaining:', this.hearts);
             this.isFlashing = true;
             this.flashTimeLeft = this.FLASH_DURATION;
             this.lastDamageTime = currentTime;
+            
+            // If this is the player and they're immortal, restore hearts to 4
+            if (this.isPlayer && debugControls.immortal && this.hearts < 4) {
+                this.hearts = 4;
+            }
+            
             return true;
         }
         return false;
@@ -145,8 +159,8 @@ class Character {
         );
         
         const currentTime = Date.now();
-        if (distanceFromCenter > sphereRadius && 
-            currentTime - this.lastDamageTime >= this.damageInterval) {
+        if (debugControls.sphere && distanceFromCenter > sphereRadius && 
+            currentTime - this.lastDamageTime >= this.FLASH_DURATION) {
             if (this.takeDamage()) {
                 if (this.hearts <= 0 && !this.isDead) {
                     this.isDead = true;
@@ -178,8 +192,23 @@ class Character {
             ctx.shadowBlur = 0;
         }
         
-        ctx.fillStyle = this.isFlashing ? 'white' : this.color;
+        // Calculate flash opacity if flashing
+        let flashOpacity = 0;
+        if (this.isFlashing) {
+            // Create a pulsing effect that goes from 0.8 to 0 opacity
+            const normalizedTime = (this.flashTimeLeft / this.FLASH_DURATION);
+            const pulseSpeed = 10; // Higher number = faster pulse
+            flashOpacity = 0.8 * Math.abs(Math.sin(normalizedTime * pulseSpeed));
+        }
+        
+        // Draw character with flash overlay
+        ctx.fillStyle = this.color;
         ctx.fillRect(this.x, this.y, this.width, this.height);
+        
+        if (flashOpacity > 0) {
+            ctx.fillStyle = `rgba(255, 255, 255, ${flashOpacity})`;
+            ctx.fillRect(this.x, this.y, this.width, this.height);
+        }
         
         const triangleSize = 15;
         ctx.beginPath();

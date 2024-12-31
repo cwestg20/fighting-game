@@ -14,6 +14,12 @@
             <button onclick="restartGame()">Play Again</button>
         </div>
         <div id="health-display"></div>
+        <div class="character-management">
+            <button id="add-character" tabindex="-1" class="add-character-btn" onmousedown="event.preventDefault()">Add Character</button>
+            <div id="character-list">
+                <!-- Character entries will be added here dynamically -->
+            </div>
+        </div>
     </div>
     <div id="debug-controls">
         <div class="debug-section">
@@ -36,6 +42,7 @@
                 <label><input type="checkbox" id="toggle-bullet-collision" checked tabindex="-1"> Bullet Collision</label>
                 <label><input type="checkbox" id="toggle-enemy-avoidance" checked tabindex="-1"> Enemy Avoidance</label>
                 <label><input type="checkbox" id="toggle-debug-bounds" checked tabindex="-1"> Show Debug Bounds</label>
+                <label><input type="checkbox" id="toggle-immortal" tabindex="-1"> Immortal Player</label>
             </div>
         </div>
     </div>

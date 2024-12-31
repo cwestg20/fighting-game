@@ -19,6 +19,7 @@ body {
     width: 1280px;
     height: 720px;
     margin-bottom: 20px;
+    overflow: hidden;
 }
 
 #gameCanvas {
@@ -167,4 +168,117 @@ body {
 
 .debug-section button:active {
     background: #3d8b40;
+}
+
+.debug-section button:active {
+    background: #3d8b40;
+}
+
+/* Character Management Styles */
+.character-management {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.15);
+    z-index: 100;
+}
+
+#character-list {
+    display: flex;
+    flex-direction: row;
+    gap: 10px;
+    flex: 1;
+}
+
+.character-entry {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 8px;
+    background: rgba(42, 42, 42, 0.8);
+    border-radius: 5px;
+    min-width: 120px;
+}
+
+.character-title {
+    color: white;
+    font-size: 14px;
+    text-align: center;
+    margin-bottom: 5px;
+}
+
+.character-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.color-indicator {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 2px solid #444;
+    flex-shrink: 0;
+}
+
+.remove-character {
+    background: #f44336;
+    color: white;
+    border: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: auto;
+}
+
+.remove-character:hover {
+    background: #d32f2f;
+}
+
+.personality-select {
+    width: 100%;
+    padding: 4px;
+    background: #444;
+    color: white;
+    border: 1px solid #555;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.personality-select:hover {
+    background: #555;
+}
+
+.add-character-btn {
+    padding: 8px 16px;
+    background: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    white-space: nowrap;
+    align-self: flex-end;
+    margin-bottom: 8px;
+}
+
+.add-character-btn:hover {
+    background: #45a049;
+}
+
+.add-character-btn:disabled {
+    background: #666;
+    cursor: not-allowed;
 } 

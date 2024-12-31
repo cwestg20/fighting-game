@@ -6,7 +6,8 @@ const debugControls = {
     platformCollision: true,
     bulletCollision: true,
     enemyAvoidance: true,
-    debugBounds: true
+    debugBounds: true,
+    immortal: false
 };
 
 // Performance monitoring variables
@@ -65,6 +66,10 @@ function initializeDebugControls() {
     });
     document.getElementById('toggle-debug-bounds').addEventListener('change', (e) => {
         debugControls.debugBounds = e.target.checked;
+        e.target.blur();  // Remove focus
+    });
+    document.getElementById('toggle-immortal').addEventListener('change', (e) => {
+        debugControls.immortal = e.target.checked;
         e.target.blur();  // Remove focus
     });
 }

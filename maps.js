@@ -57,15 +57,7 @@ const maps = {
     empty: {
         name: "Empty Arena",
         createPlatforms: (WORLD_WIDTH, WORLD_HEIGHT) => {
-            const centerX = WORLD_WIDTH / 2;
-            const centerY = WORLD_HEIGHT / 2;
-            
-            return [
-                // Just a few platforms near the center
-                { x: centerX - 200, y: centerY, width: 400 },
-                { x: centerX - 100, y: centerY - 200, width: 200 },
-                { x: centerX - 100, y: centerY + 200, width: 200 }
-            ];
+            return []; // Return empty array for no platforms
         }
     }
 };

@@ -23,16 +23,18 @@ class Minimap {
         ctx.strokeStyle = 'white';
         ctx.strokeRect(mapX, mapY, this.width, this.height);
         
-        // Draw platforms
-        ctx.fillStyle = '#666';
-        platforms.forEach(platform => {
-            ctx.fillRect(
-                mapX + platform.x * this.scaleX,
-                mapY + platform.y * this.scaleY,
-                platform.width * this.scaleX,
-                platform.height * this.scaleY
-            );
-        });
+        // Draw platforms if they exist
+        if (platforms && platforms.length > 0) {
+            ctx.fillStyle = '#666';
+            platforms.forEach(platform => {
+                ctx.fillRect(
+                    mapX + platform.x * this.scaleX,
+                    mapY + platform.y * this.scaleY,
+                    platform.width * this.scaleX,
+                    platform.height * this.scaleY
+                );
+            });
+        }
         
         // Draw player (blue square)
         const playerSize = 4;
@@ -45,15 +47,19 @@ class Minimap {
         );
         
         // Draw enemies (colored squares)
-        enemies.forEach(enemy => {
-            ctx.fillStyle = enemy.color;
-            ctx.fillRect(
-                mapX + enemy.x * this.scaleX,
-                mapY + enemy.y * this.scaleY,
-                playerSize,
-                playerSize
-            );
-        });
+        if (enemies && enemies.length > 0) {
+            enemies.forEach(enemy => {
+                if (!enemy.isDead) {  // Only draw alive enemies
+                    ctx.fillStyle = enemy.color;
+                    ctx.fillRect(
+                        mapX + enemy.x * this.scaleX,
+                        mapY + enemy.y * this.scaleY,
+                        playerSize,
+                        playerSize
+                    );
+                }
+            });
+        }
         
         // Draw sphere boundary
         ctx.beginPath();
