@@ -1,3 +1,8 @@
+// Import Platform class
+import Platform from './platform.js';
+import { Character, MOVE_SPEED } from './character.js';
+import { Bullet } from './bullet.js';
+
 // Initialize variables at the top
 let canvas, ctx, healthDisplay;
 let player, enemies, bullets;
@@ -8,16 +13,6 @@ let cameraY = 0;
 let centerX, centerY, safeRadius;
 
 // Game constants
-const GRAVITY = 0.6;
-const JUMP_FORCE = -10.2;
-const HOLD_JUMP_FORCE = -0.425;
-const MAX_JUMP_TIME = 20;
-const MOVE_SPEED = 5;
-const RUSH_SPEED = 10;
-const RUSH_DURATION = 25;
-const BULLET_SPEED = 12.75;
-const MAX_HEARTS = 5;
-const SHOOT_COOLDOWN = 250;
 const WORLD_WIDTH = 1280 * 3;
 const WORLD_HEIGHT = 720 * 3;
 const VIEWPORT_WIDTH = 1280;
@@ -183,335 +178,19 @@ function updateCamera() {
     cameraY = lerp(cameraY, targetCameraY, CAMERA_MOVE_SPEED);
 }
 
-class Character {
-    constructor(x, y, color, isPlayer = false) {
-        this.x = x;
-        this.y = y;
-        this.width = 30;
-        this.height = 50;
-        this.color = color;
-        this.velocityX = 0;
-        this.velocityY = 0;
-        this.isJumping = false;
-        this.hasDoubleJump = true;
-        this.hasRush = true;
-        this.isRushing = false;
-        this.rushTimeLeft = 0;
-        this.jumpHoldTime = 0;
-        this.hearts = MAX_HEARTS;
-        this.isPlayer = isPlayer;
-        this.direction = 1;
-        this.lastDamageTime = 0;
-        this.damageInterval = 1000;
-        this.lastShootTime = 0;
-        this.rushVelocityY = 0;
-        this.isFlashing = false;
-        this.flashTimeLeft = 0;
-        this.FLASH_DURATION = 300;
-        this.isDropping = false;  // Add drop-through state
-        this.dropCooldown = 0;    // Add cooldown for dropping
-    }
-
-    canShoot() {
-        return Date.now() - this.lastShootTime >= SHOOT_COOLDOWN;
-    }
-
-    takeDamage() {
-        const currentTime = Date.now();
-        // Only take damage if not flashing (invulnerable)
-        if (!this.isFlashing && currentTime - this.lastDamageTime >= this.damageInterval) {
-            this.hearts--;
-            this.isFlashing = true;
-            this.flashTimeLeft = this.FLASH_DURATION;
-            this.lastDamageTime = currentTime;  // Update last damage time
-            return true;
-        }
-        return false;
-    }
-
-    update(timeScale, deltaTime) {
-        // Update drop cooldown
-        if (this.dropCooldown > 0) {
-            this.dropCooldown -= deltaTime;
-        }
-
-        // Add debug logging for flash timing
-        if (this.isFlashing) {
-            this.flashTimeLeft -= deltaTime;
-            console.log(`Flash time left for ${this.isPlayer ? 'player' : 'enemy'}: ${this.flashTimeLeft}`);
-            if (this.flashTimeLeft <= 0) {
-                console.log(`Flash ended for ${this.isPlayer ? 'player' : 'enemy'}`);
-                this.isFlashing = false;
-                this.flashTimeLeft = 0;
-            }
-        }
-
-        if (!this.isRushing) {
-            this.velocityY += GRAVITY * timeScale;
-        }
-
-        if (!this.isRushing && this.velocityY > 15) {
-            this.velocityY = 15;
-        }
-
-        if (this.isRushing) {
-            this.rushTimeLeft -= timeScale;
-            if (this.rushTimeLeft <= 0) {
-                this.isRushing = false;
-                this.velocityX = this.direction * MOVE_SPEED;
-                this.velocityY = this.rushVelocityY;
-            }
-        }
-
-        if (this.isJumping && this.jumpHoldTime < MAX_JUMP_TIME && keys[' ']) {
-            this.velocityY += HOLD_JUMP_FORCE * timeScale;
-            this.jumpHoldTime++;
-        }
-
-        const previousY = this.y;
-        this.y += this.velocityY * timeScale;
-        this.x += this.velocityX * timeScale;
-
-        // Platform collision - modified to handle drop-through
-        if (debugControls.platformCollision) {
-            for (const platform of platforms) {
-                if (this.velocityY >= 0 && 
-                    previousY + this.height <= platform.y && 
-                    this.x + this.width > platform.x && 
-                    this.x < platform.x + platform.width &&
-                    this.y + this.height > platform.y &&
-                    this.y < platform.y + platform.height &&
-                    !this.isDropping) {  // Don't collide if dropping
-                    
-                    this.y = platform.y - this.height;
-                    this.velocityY = 0;
-                    this.isJumping = false;
-                    this.hasDoubleJump = true;
-                    this.hasRush = true;
-                    this.jumpHoldTime = 0;
-                }
-            }
-        }
-
-        // Reset dropping state when not on platform and cooldown is over
-        if (this.isDropping && this.dropCooldown <= 0) {
-            this.isDropping = false;
-        }
-
-        // Floor collision - use WORLD_HEIGHT instead of canvas.height
-        if (this.y + this.height > WORLD_HEIGHT) {
-            this.y = WORLD_HEIGHT - this.height;
-            this.velocityY = 0;
-            this.isJumping = false;
-            this.hasDoubleJump = true;
-            this.hasRush = true;
-            this.jumpHoldTime = 0;
-        }
-
-        // Wall collision with world bounds
-        if (this.x < 0) this.x = 0;
-        if (this.x + this.width > WORLD_WIDTH) this.x = WORLD_WIDTH - this.width;
-        if (this.y < 0) this.y = 0;
-        if (this.y + this.height > WORLD_HEIGHT) this.y = WORLD_HEIGHT - this.height;
-
-        // Check if character is outside the sphere
-        const distanceFromCenter = Math.sqrt(
-            Math.pow(this.x + this.width/2 - WORLD_WIDTH/2, 2) +
-            Math.pow(this.y + this.height/2 - WORLD_HEIGHT/2, 2)
-        );
-        
-        const currentTime = Date.now();
-        if (distanceFromCenter > sphereRadius && 
-            currentTime - this.lastDamageTime >= this.damageInterval) {
-            if (this.takeDamage()) {
-                if (this.hearts <= 0 && this.isPlayer) {
-                    endGame();
-                }
-            }
-        }
-    }
-
-    draw() {
-        // Add a visual effect when rushing
-        if (this.isRushing) {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-            ctx.fillRect(this.x - this.direction * 20, this.y, 20, this.height);
-            ctx.shadowColor = 'white';
-            ctx.shadowBlur = 10;
-        } else {
-            ctx.shadowColor = 'transparent';
-            ctx.shadowBlur = 0;
-        }
-        
-        // Draw character body with flash effect
-        ctx.fillStyle = this.isFlashing ? 'white' : this.color;
-        ctx.fillRect(this.x, this.y, this.width, this.height);
-        
-        // Draw direction indicator (triangle)
-        const triangleSize = 15;
-        ctx.beginPath();
-        if (this.direction > 0) {
-            // Facing right
-            ctx.moveTo(this.x + this.width, this.y + this.height/2);
-            ctx.lineTo(this.x + this.width - triangleSize, this.y + this.height/2 - triangleSize);
-            ctx.lineTo(this.x + this.width - triangleSize, this.y + this.height/2 + triangleSize);
-        } else {
-            // Facing left
-            ctx.moveTo(this.x, this.y + this.height/2);
-            ctx.lineTo(this.x + triangleSize, this.y + this.height/2 - triangleSize);
-            ctx.lineTo(this.x + triangleSize, this.y + this.height/2 + triangleSize);
-        }
-        ctx.closePath();
-        ctx.fillStyle = 'white';
-        ctx.fill();
-        
-        // Reset shadow after drawing character
-        ctx.shadowColor = 'transparent';
-        ctx.shadowBlur = 0;
-        
-        // Draw hearts
-        for (let i = 0; i < this.hearts; i++) {
-            ctx.fillStyle = 'red';
-            ctx.fillText('♥', this.x + (i * 15), this.y - 10);
-        }
-    }
-
-    jump() {
-        if (!this.isJumping) {
-            // First jump
-            this.velocityY = JUMP_FORCE;
-            this.isJumping = true;
-            this.jumpHoldTime = 0;
-        } else if (this.hasDoubleJump) {
-            // Double jump
-            this.velocityY = JUMP_FORCE * 0.8; // Slightly weaker double jump
-            this.hasDoubleJump = false;
-            this.jumpHoldTime = 0;
-        }
-    }
-
-    shoot() {
-        if (this.canShoot()) {
-            this.lastShootTime = Date.now();
-            return new Bullet(
-                this.x + this.width/2,
-                this.y + this.height/2,
-                this.direction * BULLET_SPEED,
-                this
-            );
-        }
-        return null;
-    }
-
-    rush() {
-        if (this.hasRush) {
-            this.isRushing = true;
-            this.rushTimeLeft = RUSH_DURATION;
-            this.hasRush = false;
-            // Store current vertical velocity
-            this.rushVelocityY = this.velocityY;
-            // Set velocities for rush
-            this.velocityX = this.direction * RUSH_SPEED;
-            this.velocityY = 0; // Zero vertical velocity during rush
-        }
-    }
-
-    drop() {
-        if (!this.isDropping && this.velocityY === 0) {  // Only drop if on platform
-            this.isDropping = true;
-            this.dropCooldown = 250;  // Set cooldown to prevent immediate re-landing
-            this.velocityY = 1;       // Small downward velocity to start falling
-        }
-    }
+// Add collision utility functions near the top with other utility functions
+function checkCollision(rect1, rect2) {
+    return rect1.x + rect1.width > rect2.x &&
+           rect1.x < rect2.x + rect2.width &&
+           rect1.y + rect1.height > rect2.y &&
+           rect1.y < rect2.y + rect2.height;
 }
 
-class Bullet {
-    constructor(x, y, velocityX, owner) {
-        this.x = x;
-        this.y = y;
-        this.radius = 4;
-        this.velocityX = velocityX;
-        this.owner = owner;
-        // Create a lighter version of the owner's color
-        this.color = this.lightenColor(owner.color, 50);  // 50% lighter
-    }
-
-    // Add method to lighten colors
-    lightenColor(color, percent) {
-        // Handle named colors
-        if (color === 'blue') color = '#0000FF';
-        if (color === 'red') color = '#FF0000';
-        if (color === 'green') color = '#008000';
-        if (color === 'purple') color = '#800080';
-        
-        // Convert to RGB
-        let hex = color.replace('#', '');
-        let r = parseInt(hex.substr(0, 2), 16);
-        let g = parseInt(hex.substr(2, 2), 16);
-        let b = parseInt(hex.substr(4, 2), 16);
-
-        // Make lighter
-        r = Math.min(255, Math.floor(r + (255 - r) * (percent / 100)));
-        g = Math.min(255, Math.floor(g + (255 - g) * (percent / 100)));
-        b = Math.min(255, Math.floor(b + (255 - b) * (percent / 100)));
-
-        // Convert back to hex
-        const rr = r.toString(16).padStart(2, '0');
-        const gg = g.toString(16).padStart(2, '0');
-        const bb = b.toString(16).padStart(2, '0');
-
-        return `#${rr}${gg}${bb}`;
-    }
-
-    update(timeScale) {
-        this.x += this.velocityX * timeScale;
-    }
-
-    draw() {
-        ctx.fillStyle = this.color;
-        ctx.beginPath();
-        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // Add a glowing effect
-        ctx.shadowColor = this.color;
-        ctx.shadowBlur = 6;
-        ctx.fill();
-        ctx.shadowBlur = 0;  // Reset shadow for other drawings
-        ctx.closePath();
-    }
-
-    checkCollision(character) {
-        // Don't damage the character that shot this bullet or characters that are rushing
-        if (character === this.owner || character.isRushing) {
-            return false;
-        }
-
-        // Adjust collision detection for circular bullets
-        const bulletLeft = this.x - this.radius;
-        const bulletRight = this.x + this.radius;
-        const bulletTop = this.y - this.radius;
-        const bulletBottom = this.y + this.radius;
-
-        return bulletRight > character.x &&
-               bulletLeft < character.x + character.width &&
-               bulletBottom > character.y &&
-               bulletTop < character.y + character.height;
-    }
-}
-
-class Platform {
-    constructor(x, y, width) {
-        this.x = x;
-        this.y = y;
-        this.width = width;
-        this.height = 15;
-    }
-
-    draw() {
-        ctx.fillStyle = '#666';
-        ctx.fillRect(this.x, this.y, this.width, this.height);
-    }
+function checkPlatformCollision(character, platform, previousY) {
+    return character.velocityY >= 0 && 
+           previousY + character.height <= platform.y &&
+           checkCollision(character, platform) &&
+           !character.isDropping;
 }
 
 // Create platforms array after centerX is initialized
@@ -631,9 +310,9 @@ function updatePlayer(timeScale) {
 
     // Handle continuous shooting with O key
     if ((keys['o'] || keys['O']) && player.canShoot()) {
-        const bullet = player.shoot();
-        if (bullet) {
-            bullets.push(bullet);
+        const bulletData = player.shoot();
+        if (bulletData) {
+            bullets.push(new Bullet(bulletData.x, bulletData.y, bulletData.direction, bulletData.owner));
         }
     }
 }
@@ -763,8 +442,10 @@ function updateAI(timeScale, deltaTime) {
                            Math.random() < 0.05;
 
         if (hasGoodShot && enemy.canShoot()) {
-            const bullet = enemy.shoot();
-            if (bullet) bullets.push(bullet);
+            const bulletData = enemy.shoot();
+            if (bulletData) {
+                bullets.push(new Bullet(bulletData.x, bulletData.y, bulletData.direction, bulletData.owner));
+            }
         }
 
         // Opportunistic rushing with reduced frequency
@@ -779,7 +460,7 @@ function updateAI(timeScale, deltaTime) {
         }
 
         // Update enemy physics
-        enemy.update(timeScale, deltaTime);
+        enemy.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, keys, endGame);
     });
 }
 
@@ -813,6 +494,9 @@ function restartGame() {
     // Clear bullets
     bullets = [];
 }
+
+// Add restartGame to window object
+window.restartGame = restartGame;
 
 function drawMinimap() {
     const mapX = VIEWPORT_WIDTH - MINIMAP_WIDTH - MINIMAP_MARGIN;
@@ -913,23 +597,23 @@ function gameLoop(timestamp) {
         }
         
         // Draw platforms
-        platforms.forEach(platform => platform.draw());
+        platforms.forEach(platform => platform.draw(ctx));
         
         // Update game objects
         updatePlayer(timeScale);
-        player.update(timeScale, deltaTime);
-        player.draw();
+        player.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, keys, endGame);
+        player.draw(ctx);
         
         updateAI(timeScale, deltaTime);
         enemies.forEach(enemy => {
-            enemy.update(timeScale, deltaTime);
-            enemy.draw();
+            enemy.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, keys, endGame);
+            enemy.draw(ctx);
         });
         
         // Update bullets with timeScale
         bullets = bullets.filter(bullet => {
             bullet.update(timeScale);
-            bullet.draw();
+            bullet.draw(ctx);
             
             let hit = false;
             if (debugControls.bulletCollision) {
