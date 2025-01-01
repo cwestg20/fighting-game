@@ -30,7 +30,7 @@ class InputHandler {
         });
     }
 
-    update(timeScale, player, bullets, Bullet) {
+    update(timeScale, player, bullets, Bullet, gameState) {
         if (!player.isRushing) {
             if (keys['a'] || keys['A']) {
                 player.velocityX = -MOVE_SPEED * timeScale;
@@ -44,8 +44,8 @@ class InputHandler {
         }
 
         // Handle continuous shooting with O key
-        if ((keys['o'] || keys['O']) && player.canShoot()) {
-            const bulletData = player.shoot();
+        if ((keys['o'] || keys['O']) && player.canShoot(gameState)) {
+            const bulletData = player.shoot(gameState);
             if (bulletData) {
                 bullets.push(new Bullet(bulletData.x, bulletData.y, bulletData.direction, bulletData.owner));
             }

@@ -21,16 +21,16 @@ const performanceMetrics = {
 
 // FPS tracking variables
 let frameCount = 0;
-let lastFpsTime = Date.now();
+let lastFpsTime = performance.now();
 let currentFps = 0;
 
 function calculateFPS() {
     frameCount++;
-    const currentTime = Date.now();
+    const currentTime = performance.now();
     const timeDiff = currentTime - lastFpsTime;
     
-    // Update FPS every second
-    if (timeDiff >= 1000) {
+    // Update FPS every 500ms for more stable readings
+    if (timeDiff >= 500) {
         currentFps = Math.round((frameCount * 1000) / timeDiff);
         frameCount = 0;
         lastFpsTime = currentTime;

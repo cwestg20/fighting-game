@@ -15,6 +15,74 @@ import { InputHandler } from './input.js';
 import { Minimap } from './minimap.js';
 import { maps } from './maps.js';
 import { CharacterManager } from './characterManager.js';
+import { GameState } from './gameState.js';
+import { Random } from './random.js';
+import { FIXED_TIMESTEP, MAX_HEARTS } from './constants.js';
+
+// Game loop constants
+const FRAME_RATE = 60;
+const FRAME_TIME = 1000 / FRAME_RATE;
+const MAX_FRAME_SKIP = 5;
+const INITIAL_SEED = 12345; // Fixed seed for deterministic gameplay
+
+class GameLoop {
+    constructor(game) {
+        this.game = game;
+        this.lastUpdateTime = 0;
+        this.frameDelta = 0;
+        this.frameNumber = 0;
+        this.fixedTimeStep = FIXED_TIMESTEP / 1000; // Convert ms to seconds
+        this.gameState = new GameState(INITIAL_SEED);
+        this.isVisible = true;
+
+        // Add visibility change listener
+        document.addEventListener('visibilitychange', () => {
+            this.isVisible = document.visibilityState === 'visible';
+            if (this.isVisible) {
+                // Reset timing when becoming visible again
+                this.lastUpdateTime = performance.now() / 1000;
+                this.frameDelta = 0;
+            }
+        });
+    }
+
+    start() {
+        this.lastUpdateTime = performance.now() / 1000; // Convert to seconds
+        this.loop();
+    }
+
+    loop() {
+        if (!this.isVisible) {
+            requestAnimationFrame(() => this.loop());
+            return;
+        }
+
+        const currentTime = performance.now() / 1000; // Convert to seconds
+        const deltaTime = Math.min(currentTime - this.lastUpdateTime, 0.1); // Cap at 100ms
+        this.lastUpdateTime = currentTime;
+
+        this.frameDelta += deltaTime;
+
+        // Process fixed number of updates
+        let updates = 0;
+        while (this.frameDelta >= this.fixedTimeStep && updates < MAX_FRAME_SKIP) {
+            this.gameState.update();
+            this.game.fixedUpdate(this.fixedTimeStep, this.gameState);
+            this.frameDelta -= this.fixedTimeStep;
+            updates++;
+            this.frameNumber++;
+        }
+
+        // If we still have too much accumulated time, discard it
+        if (this.frameDelta > this.fixedTimeStep * 2) {
+            this.frameDelta = this.fixedTimeStep;
+        }
+
+        // Render can interpolate between states if needed
+        this.game.render();
+        requestAnimationFrame(() => this.loop());
+    }
+}
 
 // Initialize variables at the top
 let canvas, ctx, healthDisplay;
@@ -28,6 +96,8 @@ let inputHandler; // Add input handler variable
 let minimap; // Add minimap variable
 let currentMap = 'default'; // Track current map
 let characterManager; // Add character manager variable
+let gameLoop; // Add game loop variable
+let gameState; // Add game state variable
 
 // Game constants
 const WORLD_WIDTH = 1280 * 3;
@@ -39,10 +109,6 @@ const MINIMAP_WIDTH = 200;
 const MINIMAP_HEIGHT = 150;
 const MINIMAP_MARGIN = 10;
 const SPHERE_SHRINK_RATE = 0.5;
-
-// Game state
-let lastFrameTime = 0;
-const TARGET_FRAME_TIME = 1000/60;
 
 // Create platforms array after centerX is initialized
 let platforms = [];
@@ -114,7 +180,7 @@ function changeMap(mapId) {
     }
 }
 
-function updateAI(timeScale, deltaTime) {
+function updateAI(timeScale, deltaTime, gameState) {
     const DESIRED_ENEMY_SPACING = 200;
     const SPACING_FORCE = 1;
     const RANDOM_MOVEMENT_INTERVAL = 120;
@@ -126,7 +192,7 @@ function updateAI(timeScale, deltaTime) {
     
     aliveEnemies.forEach(enemy => {
         // Always update enemy physics for all enemies
-        enemy.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, inputHandler.isKeyPressed.bind(inputHandler), endGame, DeathBurst, effects);
+        enemy.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, inputHandler.isKeyPressed.bind(inputHandler), endGame, DeathBurst, effects, gameState);
         
         // Only apply AI logic to non-player characters and if AI is enabled
         if (!enemy.isPlayer && debugControls.ai) {
@@ -155,8 +221,8 @@ function updateAI(timeScale, deltaTime) {
                     
                     // Shoot if target is in range
                     const stationaryHeightDiff = Math.abs(stationaryTarget.y - enemy.y);
-                    if (stationaryHeightDiff < 50 && stationaryDistance < 400 && Math.random() < 0.05) {
-                        const bulletData = enemy.shoot();
+                    if (stationaryHeightDiff < 50 && stationaryDistance < 400 && gameState.randomChance(0.05)) {
+                        const bulletData = enemy.shoot(gameState);
                         if (bulletData) {
                             bullets.push(new Bullet(bulletData.x, bulletData.y, bulletData.direction, bulletData.owner));
                         }
@@ -168,8 +234,8 @@ function updateAI(timeScale, deltaTime) {
                     // Give each enemy a movement goal if they don't have one
                     if (!enemy.movementGoal) {
                         enemy.movementGoal = {
-                            x: Math.random() * WORLD_WIDTH,
-                            y: Math.random() * WORLD_HEIGHT,
+                            x: gameState.random() * WORLD_WIDTH,
+                            y: gameState.random() * WORLD_HEIGHT,
                             timeLeft: RANDOM_MOVEMENT_INTERVAL
                         };
                     }
@@ -181,12 +247,12 @@ function updateAI(timeScale, deltaTime) {
                         // Pick a new random position, handling case where there are no platforms
                         let newX, newY;
                         if (platforms.length > 0) {
-                            const targetPlatform = platforms[Math.floor(Math.random() * platforms.length)];
-                            newX = targetPlatform.x + Math.random() * targetPlatform.width;
-                            newY = targetPlatform.y - 50 - Math.random() * 50;
+                            const targetPlatform = platforms[Math.floor(gameState.random() * platforms.length)];
+                            newX = targetPlatform.x + gameState.random() * targetPlatform.width;
+                            newY = targetPlatform.y - 50 - gameState.random() * 50;
                         } else {
                             // If no platforms, move randomly along the ground
-                            newX = Math.random() * WORLD_WIDTH;
+                            newX = gameState.random() * WORLD_WIDTH;
                             newY = WORLD_HEIGHT - 100; // Just above ground level
                         }
                         
@@ -245,10 +311,10 @@ function updateAI(timeScale, deltaTime) {
                                     avoidanceForceY += (dy / distance) * 2;
                                     
                                     // Emergency jump or rush if bullet is very close
-                                    if (distance < 50 && Math.random() < 0.3) {
-                                        if (enemy.hasRush && Math.random() < 0.3) {
+                                    if (distance < 50 && gameState.randomChance(0.3)) {
+                                        if (enemy.hasRush && gameState.randomChance(0.3)) {
                                             enemy.rush();
-                                        } else if (!enemy.isJumping && Math.random() < 0.5) {
+                                        } else if (!enemy.isJumping && gameState.randomChance(0.5)) {
                                             enemy.jump();
                                         }
                                     }
@@ -276,9 +342,9 @@ function updateAI(timeScale, deltaTime) {
                         }
                         
                         // Jump if need to go up or dodge, with reduced frequency
-                        if ((dy < -50 && !enemy.isJumping && Math.random() < 0.05) ||
-                            (Math.abs(avoidanceForceY) > 3 && Math.random() < 0.1)) {
-                            if (enemy.hasDoubleJump && Math.random() < 0.2) {
+                        if ((dy < -50 && !enemy.isJumping && gameState.randomChance(0.05)) ||
+                            (Math.abs(avoidanceForceY) > 3 && gameState.randomChance(0.1))) {
+                            if (enemy.hasDoubleJump && gameState.randomChance(0.2)) {
                                 enemy.jump();
                             }
                         }
@@ -287,10 +353,10 @@ function updateAI(timeScale, deltaTime) {
                     // Opportunistic shooting with slightly reduced frequency
                     const hasGoodShot = Math.abs(activeHeightDiff) < 50 && 
                                    activeDistance < 400 && 
-                                   Math.random() < 0.05;
+                                   gameState.randomChance(0.05);
 
-                    if (hasGoodShot && enemy.canShoot()) {
-                        const bulletData = enemy.shoot();
+                    if (hasGoodShot && enemy.canShoot(gameState)) {
+                        const bulletData = enemy.shoot(gameState);
                         if (bulletData) {
                             bullets.push(new Bullet(bulletData.x, bulletData.y, bulletData.direction, bulletData.owner));
                         }
@@ -301,7 +367,7 @@ function updateAI(timeScale, deltaTime) {
                                    activeDistance < 300 && 
                                    activeDistance > 100 && 
                                    enemy.hasRush &&
-                                   Math.random() < 0.02;
+                                   gameState.randomChance(0.02);
 
                     if (hasGoodRush) {
                         enemy.rush();
@@ -316,7 +382,7 @@ function updateAI(timeScale, deltaTime) {
 }
 
 function endGame() {
-    gameOver = true;
+    // Just show the game over screen, don't stop the game
     document.getElementById('game-over').classList.remove('hidden');
 }
 
@@ -327,150 +393,56 @@ function restartGame() {
 // Add restartGame to window object
 window.restartGame = restartGame;
 
-function gameLoop(timestamp) {
-    // Calculate delta time
-    if (!lastFrameTime) lastFrameTime = timestamp;
-    const deltaTime = timestamp - lastFrameTime;
-    const timeScale = deltaTime / TARGET_FRAME_TIME;
-    lastFrameTime = timestamp;
+function render() {
+    ctx.clearRect(0, 0, VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
+    ctx.save();
     
-    if (!gameOver) {
-        camera.update(player, enemies);
-        ctx.clearRect(0, 0, VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
-        ctx.save();
-        
-        // Apply camera transform
-        camera.applyTransform(ctx);
-        
-        // Draw sphere and update radius only if sphere is enabled
-        if (debugControls.sphere) {
-            ctx.beginPath();
-            ctx.arc(WORLD_WIDTH/2, WORLD_HEIGHT/2, sphereRadius, 0, Math.PI * 2);
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-            ctx.stroke();
-            // Only shrink sphere if enabled
-            sphereRadius = Math.max(100, sphereRadius - SPHERE_SHRINK_RATE * timeScale);
-        }
-        
-        // Draw platforms
-        platforms.forEach(platform => platform.draw(ctx));
-        
-        // Update and draw effects first
-        effects = effects.filter(effect => {
-            effect.update();
-            effect.draw(ctx);
-            const isAlive = effect.particles.length > 0;
-            if (!isAlive) {
-                console.log('Effect removed - no particles left');
-            }
-            return isAlive;
-        });
-        
-        // Update game objects
-        inputHandler.update(timeScale, player, bullets, Bullet);  // Update input
-        player.update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, inputHandler.isKeyPressed.bind(inputHandler), endGame, DeathBurst, effects);
-        if (!player.isDead) {
-            player.draw(ctx);
-        }
-        
-        // Update and draw all enemies
-        updateAI(timeScale, deltaTime);
-        enemies.forEach(enemy => {
-            // Only hide the character if they're dead AND their death effect is gone
-            const deathEffect = enemy.isDead ? effects.find(effect => {
-                const matches = effect instanceof DeathBurst && 
-                    Math.abs(effect.x - (enemy.x + enemy.width/2)) < 50 &&
-                    Math.abs(effect.y - (enemy.y + enemy.height/2)) < 50;
-                return matches;
-            }) : null;
-            
-            const shouldDraw = !enemy.isDead || (deathEffect && deathEffect.particles.length > 0);
-            if (shouldDraw) {
-                enemy.draw(ctx);
-            }
-        });
-        
-        // Update bullets with timeScale
-        bullets = bullets.filter(bullet => {
-            bullet.update(timeScale);
-            bullet.draw(ctx);
-            
-            let hit = false;
-            if (debugControls.bulletCollision) {
-                if (bullet.checkCollision(player)) {
-                    if (player.takeDamage()) {
-                        hit = true;
-                        if (player.hearts <= 0) {
-                            player.isDead = true;
-                            effects.push(new DeathBurst(player.x + player.width/2, player.y + player.height/2, player.color));
-                            endGame();
-                        }
-                    }
-                }
-                
-                enemies.forEach((enemy, index) => {
-                    if (bullet.checkCollision(enemy)) {
-                        if (enemy.takeDamage()) {
-                            hit = true;
-                            if (enemy.hearts <= 0 && !enemy.isDead) {
-                                enemy.isDead = true;
-                                effects.push(new DeathBurst(
-                                    enemy.x + enemy.width/2, 
-                                    enemy.y + enemy.height/2, 
-                                    enemy.color
-                                ));
-                            }
-                        }
-                    }
-                });
-            }
-            
-            return !hit && bullet.x > 0 && bullet.x < WORLD_WIDTH;
-        });
-        
-        // Remove dead enemies after their death animation completes
-        enemies = enemies.filter(enemy => {
-            if (enemy.isDead) {
-                // Find the death effect for this enemy
-                const deathEffect = effects.find(effect => {
-                    const matches = effect instanceof DeathBurst && 
-                        Math.abs(effect.x - (enemy.x + enemy.width/2)) < 50 &&
-                        Math.abs(effect.y - (enemy.y + enemy.height/2)) < 50;
-                    return matches;
-                });
-                const keepEnemy = deathEffect && deathEffect.particles.length > 0;
-                if (!keepEnemy) {
-                    characterManager.updateCharacterList();
-                }
-                return keepEnemy;
-            }
-            return true;
-        });
-        
-        // Ensure enemies array is synced with character manager
-        if (characterManager.enemies !== enemies) {
-            characterManager.enemies = enemies;
-        }
-        
-        ctx.restore();
-        
-        // UI updates
-        healthDisplay.textContent = `❤️ ${player.hearts}`;
-        const fps = calculateFPS();
-        
-        // Draw FPS counter
-        drawFPS(ctx, 110, 20);
-        
-        // Draw minimap if enabled
-        if (debugControls.minimap) {
-            minimap.draw(ctx, VIEWPORT_WIDTH, player, enemies, platforms, sphereRadius);
-        }
+    // Apply camera transform
+    camera.applyTransform(ctx);
+    
+    // Draw sphere if enabled
+    if (debugControls.sphere) {
+        ctx.beginPath();
+        ctx.arc(WORLD_WIDTH/2, WORLD_HEIGHT/2, sphereRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.stroke();
     }
     
-    requestAnimationFrame(gameLoop);
+    // Draw platforms
+    platforms.forEach(platform => platform.draw(ctx));
+    
+    // Draw player if not dead
+    if (!player.isDead) {
+        player.draw(ctx);
+    }
+    
+    // Draw enemies (only if they're alive)
+    enemies.forEach(enemy => {
+        if (!enemy.isDead) {
+            enemy.draw(ctx);
+        }
+    });
+    
+    // Draw bullets
+    bullets.forEach(bullet => bullet.draw(ctx));
+    
+    // Draw effects (including death bursts)
+    effects.forEach(effect => effect.draw(ctx));
+    
+    ctx.restore();
+    
+    // UI updates
+    healthDisplay.textContent = `❤️ ${player.hearts}`;
+    
+    // Draw FPS counter
+    drawFPS(ctx, 110, 20);
+    
+    // Draw minimap if enabled
+    if (debugControls.minimap) {
+        minimap.draw(ctx, VIEWPORT_WIDTH, player, enemies, platforms, sphereRadius);
+    }
 }
 
-// Update initialization
 function initializeGame() {
     // Store current map selection
     const previousMap = currentMap;
@@ -479,7 +451,10 @@ function initializeGame() {
     gameOver = false;
     document.getElementById('game-over').classList.add('hidden');
     
-    // Initialize sphere radius (reduced from 9x to 4x)
+    // Initialize game state with seed
+    gameState = new GameState(INITIAL_SEED);
+    
+    // Initialize sphere radius
     sphereRadius = Math.min(canvas.width, canvas.height) * 3;
     
     // Initialize world center coordinates
@@ -532,13 +507,116 @@ function initializeGame() {
     }
     
     bullets = [];
-    effects = []; // Initialize effects array
+    effects = [];
+    
+    // Initialize game loop
+    gameLoop = new GameLoop({
+        fixedUpdate: fixedUpdate,
+        render: render
+    });
+    gameLoop.start();
+}
+
+function fixedUpdate(timeStep, gameState) {
+    // Remove the gameOver check so the game continues running
+    camera.update(player, enemies);
+    
+    // Update game objects
+    // Only update player if they're not dead
+    if (!player.isDead) {
+        inputHandler.update(timeStep, player, bullets, Bullet, gameState);
+    }
+    player.update(timeStep, timeStep, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, inputHandler.isKeyPressed.bind(inputHandler), endGame, DeathBurst, effects, gameState);
+    
+    // Update and draw all enemies
+    updateAI(timeStep, timeStep, gameState);
+    
+    // Update bullets with timeStep
+    bullets = bullets.filter(bullet => {
+        bullet.update(timeStep);
+        
+        // Remove bullets that are out of bounds
+        if (bullet.x < 0 || bullet.x > WORLD_WIDTH) {
+            return false;
+        }
+        
+        // Check collisions if enabled
+        if (debugControls.bulletCollision) {
+            // Check player collision only if player is alive
+            if (!player.isDead && bullet.checkCollision(player)) {
+                console.log('Bullet hit player');
+                // Only apply damage if not already flashing
+                if (!player.isFlashing && player.takeDamage(gameState)) {
+                    console.log('Player took damage, hearts:', player.hearts);
+                    if (player.hearts <= 0) {
+                        player.isDead = true;
+                        effects.push(new DeathBurst(player.x + player.width/2, player.y + player.height/2, player.color, gameState));
+                        endGame();
+                    }
+                    return false; // Remove bullet only if damage was dealt
+                }
+            }
+            
+            // Check enemy collisions
+            for (const enemy of enemies) {
+                if (bullet.checkCollision(enemy)) {
+                    console.log('Bullet hit enemy:', enemy.color);
+                    // Only apply damage if not already flashing
+                    if (!enemy.isFlashing && enemy.takeDamage(gameState)) {
+                        console.log('Enemy took damage, hearts:', enemy.hearts);
+                        if (enemy.hearts <= 0 && !enemy.isDead) {
+                            enemy.isDead = true;
+                            effects.push(new DeathBurst(
+                                enemy.x + enemy.width/2, 
+                                enemy.y + enemy.height/2, 
+                                enemy.color,
+                                gameState
+                            ));
+                        }
+                        return false; // Remove bullet only if damage was dealt
+                    }
+                }
+            }
+        }
+        
+        return true; // Keep bullet if no damage was dealt
+    });
+    
+    // Update effects
+    effects = effects.filter(effect => effect.update());
+    
+    // Remove dead enemies after their death animation completes
+    enemies = enemies.filter(enemy => {
+        if (enemy.isDead) {
+            // Find the death effect for this enemy
+            const deathEffect = effects.find(effect => {
+                const matches = effect instanceof DeathBurst && 
+                    Math.abs(effect.x - (enemy.x + enemy.width/2)) < 50 &&
+                    Math.abs(effect.y - (enemy.y + enemy.height/2)) < 50;
+                return matches;
+            });
+            const keepEnemy = deathEffect && deathEffect.particles.length > 0;
+            if (!keepEnemy) {
+                characterManager.updateCharacterList();
+            }
+            return keepEnemy;
+        }
+        return true;
+    });
+    
+    // Ensure enemies array is synced with character manager
+    if (characterManager.enemies !== enemies) {
+        characterManager.enemies = enemies;
+    }
+    
+    // Update sphere radius only if sphere is enabled
+    if (debugControls.sphere) {
+        sphereRadius = Math.max(100, sphereRadius - SPHERE_SHRINK_RATE * timeStep);
+    }
 }
 
 // Update window.onload
 window.onload = function() {
-    console.log('Game starting...');
-    
     // Initialize canvas and context
     canvas = document.getElementById('gameCanvas');
     ctx = canvas.getContext('2d');
@@ -589,9 +667,6 @@ window.onload = function() {
         }
     });
     
-    // Initialize game objects
-    initializeGame();
-    
     // Prevent spacebar from scrolling the page
     window.addEventListener('keydown', (e) => {
         if (e.key === ' ' || e.code === 'Space') {
@@ -599,6 +674,6 @@ window.onload = function() {
         }
     });
     
-    // Start the game loop with timestamp
-    requestAnimationFrame(gameLoop);
+    // Initialize game
+    initializeGame();
 }; 

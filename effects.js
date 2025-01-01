@@ -1,5 +1,5 @@
 class Particle {
-    constructor(x, y, angle, speed, color, size = 4) {
+    constructor(x, y, angle, speed, color, size = 4, gameState) {
         this.x = x;
         this.y = y;
         this.angle = angle;
@@ -7,10 +7,10 @@ class Particle {
         this.color = color;
         this.size = size;
         this.alpha = 1;
-        this.deceleration = 0.97; // Slower deceleration (was 0.95)
-        this.fadeRate = 0.02;     // Slower fade (was 0.03)
-        this.rotation = Math.random() * Math.PI * 2; // Add rotation
-        this.rotationSpeed = (Math.random() - 0.5) * 0.2; // Rotation speed
+        this.deceleration = 0.97; // Slower deceleration
+        this.fadeRate = 0.02;     // Slower fade
+        this.rotation = gameState.random() * Math.PI * 2; // Deterministic rotation
+        this.rotationSpeed = (gameState.random() - 0.5) * 0.2; // Deterministic rotation speed
     }
 
     update() {
@@ -51,7 +51,7 @@ class Particle {
 }
 
 class DeathBurst {
-    constructor(x, y, color) {
+    constructor(x, y, color, gameState) {
         this.x = x;  // Store initial position
         this.y = y;
         this.color = color;
@@ -60,21 +60,16 @@ class DeathBurst {
         
         // Create particles in a circular burst
         for (let i = 0; i < numParticles; i++) {
-            const angle = (Math.PI * 2 * i) / numParticles + (Math.random() * 0.5 - 0.25);
-            const speed = 8 + Math.random() * 4;
-            const size = 4 + Math.random() * 4;
-            this.particles.push(new Particle(x, y, angle, speed, color, size));
+            const angle = (Math.PI * 2 * i) / numParticles + (gameState.random() * 0.5 - 0.25);
+            const speed = 8 + gameState.random() * 4;
+            const size = 4 + gameState.random() * 4;
+            this.particles.push(new Particle(x, y, angle, speed, color, size, gameState));
         }
-        console.log('DeathBurst created with', numParticles, 'particles at', x, y);
     }
 
     update() {
-        const oldLength = this.particles.length;
         // Update all particles and remove dead ones
         this.particles = this.particles.filter(particle => particle.update());
-        if (oldLength !== this.particles.length) {
-            console.log('Particles updated, count changed from', oldLength, 'to', this.particles.length);
-        }
         return this.particles.length > 0; // Return true if any particles are still alive
     }
 

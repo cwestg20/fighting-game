@@ -1,15 +1,16 @@
 import { debugControls } from './debug.js';
-
-// Game constants needed by Character
-const GRAVITY = 0.6;
-const JUMP_FORCE = -10.2;
-const HOLD_JUMP_FORCE = -0.425;
-const MAX_JUMP_TIME = 20;
-const MOVE_SPEED = 5;
-const RUSH_SPEED = 10;
-const RUSH_DURATION = 25;
-const MAX_HEARTS = 5;
-const SHOOT_COOLDOWN = 250;
+import {
+    GRAVITY,
+    JUMP_FORCE,
+    HOLD_JUMP_FORCE,
+    MAX_JUMP_TIME,
+    MOVE_SPEED,
+    RUSH_SPEED,
+    RUSH_DURATION,
+    MAX_HEARTS,
+    SHOOT_COOLDOWN,
+    DAMAGE_COOLDOWN
+} from './constants.js';
 
 // Utility functions needed by Character
 function checkCollision(rect1, rect2) {
@@ -26,8 +27,11 @@ function checkPlatformCollision(character, platform, previousY) {
            !character.isDropping;
 }
 
+let nextCharacterId = 1;
+
 class Character {
     constructor(x, y, color, isPlayer = false) {
+        this.id = nextCharacterId++;
         this.x = x;
         this.y = y;
         this.width = 30;
@@ -44,11 +48,8 @@ class Character {
         this.hearts = MAX_HEARTS;
         this.isPlayer = isPlayer;
         this.direction = 1;
-        this.lastDamageTime = 0;
-        this.FLASH_DURATION = 900;
         this.isFlashing = false;
         this.flashTimeLeft = 0;
-        this.lastShootTime = 0;
         this.rushVelocityY = 0;
         this.isDropping = false;
         this.dropCooldown = 0;
@@ -62,18 +63,23 @@ class Character {
         };
     }
 
-    canShoot() {
-        return Date.now() - this.lastShootTime >= SHOOT_COOLDOWN;
+    canShoot(gameState) {
+        return gameState.canShoot(this.id);
     }
 
-    takeDamage() {
-        const currentTime = Date.now();
-        if (!this.isFlashing && currentTime - this.lastDamageTime >= this.FLASH_DURATION) {
+    takeDamage(gameState) {
+        if (!this.isFlashing && gameState.canTakeDamage(this.id)) {
+            console.log('Taking damage:', {
+                character: this.color,
+                currentHearts: this.hearts,
+                isFlashing: this.isFlashing,
+                flashTimeLeft: this.flashTimeLeft
+            });
+            
             this.hearts--;
-            console.log('Character took damage:', this.color, 'Hearts remaining:', this.hearts);
             this.isFlashing = true;
-            this.flashTimeLeft = this.FLASH_DURATION;
-            this.lastDamageTime = currentTime;
+            this.flashTimeLeft = DAMAGE_COOLDOWN;
+            gameState.recordDamage(this.id);
             
             // If this is the player and they're immortal, restore hearts to 4
             if (this.isPlayer && debugControls.immortal && this.hearts < 4) {
@@ -85,13 +91,13 @@ class Character {
         return false;
     }
 
-    update(timeScale, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, keys, endGame, DeathBurst, effects) {
+    update(timeStep, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, keys, endGame, DeathBurst, effects, gameState) {
         if (this.dropCooldown > 0) {
             this.dropCooldown -= deltaTime;
         }
 
         if (this.isFlashing) {
-            this.flashTimeLeft -= deltaTime;
+            this.flashTimeLeft -= deltaTime * 1000;
             if (this.flashTimeLeft <= 0) {
                 this.isFlashing = false;
                 this.flashTimeLeft = 0;
@@ -99,30 +105,30 @@ class Character {
         }
 
         if (!this.isRushing) {
-            this.velocityY += GRAVITY * timeScale;
+            this.velocityY += GRAVITY * timeStep;
         }
 
-        if (!this.isRushing && this.velocityY > 15) {
-            this.velocityY = 15;
+        if (!this.isRushing && this.velocityY > 900 * timeStep) { // Max fall speed
+            this.velocityY = 900 * timeStep;
         }
 
         if (this.isRushing) {
-            this.rushTimeLeft -= timeScale;
+            this.rushTimeLeft -= timeStep;
             if (this.rushTimeLeft <= 0) {
                 this.isRushing = false;
-                this.velocityX = this.direction * MOVE_SPEED;
+                this.velocityX = this.direction * MOVE_SPEED * timeStep;
                 this.velocityY = this.rushVelocityY;
             }
         }
 
         if (this.isJumping && this.jumpHoldTime < MAX_JUMP_TIME && keys[' ']) {
-            this.velocityY += HOLD_JUMP_FORCE * timeScale;
+            this.velocityY += HOLD_JUMP_FORCE * timeStep;
             this.jumpHoldTime++;
         }
 
         const previousY = this.y;
-        this.y += this.velocityY * timeScale;
-        this.x += this.velocityX * timeScale;
+        this.y += this.velocityY;
+        this.x += this.velocityX;
 
         for (const platform of platforms) {
             if (checkPlatformCollision(this, platform, previousY)) {
@@ -158,10 +164,9 @@ class Character {
             Math.pow(this.y + this.height/2 - WORLD_HEIGHT/2, 2)
         );
         
-        const currentTime = Date.now();
         if (debugControls.sphere && distanceFromCenter > sphereRadius && 
-            currentTime - this.lastDamageTime >= this.FLASH_DURATION) {
-            if (this.takeDamage()) {
+            gameState.canTakeDamage(this.id)) {
+            if (this.takeDamage(gameState)) {
                 if (this.hearts <= 0 && !this.isDead) {
                     this.isDead = true;
                     if (DeathBurst && effects) {
@@ -195,10 +200,10 @@ class Character {
         // Calculate flash opacity if flashing
         let flashOpacity = 0;
         if (this.isFlashing) {
-            // Create a pulsing effect that goes from 0.8 to 0 opacity
-            const normalizedTime = (this.flashTimeLeft / this.FLASH_DURATION);
-            const pulseSpeed = 10; // Higher number = faster pulse
-            flashOpacity = 0.8 * Math.abs(Math.sin(normalizedTime * pulseSpeed));
+            // Create a faster blinking effect (8 blinks per second)
+            const blinkFrequency = 4;
+            const normalizedTime = (this.flashTimeLeft / DAMAGE_COOLDOWN) * Math.PI * 2 * blinkFrequency;
+            flashOpacity = Math.sin(normalizedTime) * 0.5 + 0.5; // Oscillate between 0 and 1
         }
         
         // Draw character with flash overlay
@@ -206,7 +211,7 @@ class Character {
         ctx.fillRect(this.x, this.y, this.width, this.height);
         
         if (flashOpacity > 0) {
-            ctx.fillStyle = `rgba(255, 255, 255, ${flashOpacity})`;
+            ctx.fillStyle = `rgba(255, 255, 255, ${flashOpacity * 0.7})`; // Max opacity of 0.7
             ctx.fillRect(this.x, this.y, this.width, this.height);
         }
         
@@ -236,19 +241,19 @@ class Character {
 
     jump() {
         if (!this.isJumping) {
-            this.velocityY = JUMP_FORCE;
+            this.velocityY = JUMP_FORCE * (1/60); // Scale for one frame
             this.isJumping = true;
             this.jumpHoldTime = 0;
         } else if (this.hasDoubleJump) {
-            this.velocityY = JUMP_FORCE * 0.8;
+            this.velocityY = JUMP_FORCE * 0.8 * (1/60); // Scale for one frame
             this.hasDoubleJump = false;
             this.jumpHoldTime = 0;
         }
     }
 
-    shoot() {
-        if (this.canShoot()) {
-            this.lastShootTime = Date.now();
+    shoot(gameState) {
+        if (this.canShoot(gameState)) {
+            gameState.recordShot(this.id);
             return {
                 x: this.x + this.width/2,
                 y: this.y + this.height/2,
@@ -265,7 +270,7 @@ class Character {
             this.rushTimeLeft = RUSH_DURATION;
             this.hasRush = false;
             this.rushVelocityY = this.velocityY;
-            this.velocityX = this.direction * RUSH_SPEED;
+            this.velocityX = this.direction * RUSH_SPEED * (1/60); // Scale for one frame
             this.velocityY = 0;
         }
     }

@@ -25,9 +25,18 @@ class Camera {
     }
 
     update(player, enemies) {
-        // Calculate base camera position (centered on player)
-        const targetX = player.x - this.viewportWidth/2;
-        const targetY = player.y - this.viewportHeight/2;
+        // If player is dead, find a living enemy to follow
+        let targetCharacter = player;
+        if (player.isDead) {
+            const livingEnemies = enemies.filter(enemy => !enemy.isDead);
+            if (livingEnemies.length > 0) {
+                targetCharacter = livingEnemies[Math.floor(Math.random() * livingEnemies.length)];
+            }
+        }
+
+        // Calculate base camera position (centered on target character)
+        const targetX = targetCharacter.x - this.viewportWidth/2;
+        const targetY = targetCharacter.y - this.viewportHeight/2;
         
         // Calculate dynamic buffer based on current zoom
         const zoomFactor = (this.currentZoom - MAX_ZOOM_OUT) / (DEFAULT_ZOOM - MAX_ZOOM_OUT);
@@ -36,8 +45,9 @@ class Camera {
         
         // Check for nearby enemies with dynamic buffer
         let nearbyEnemies = enemies.filter(enemy => {
-            const dx = Math.abs(enemy.x - player.x);
-            const dy = Math.abs(enemy.y - player.y);
+            if (enemy.isDead) return false;
+            const dx = Math.abs(enemy.x - targetCharacter.x);
+            const dy = Math.abs(enemy.y - targetCharacter.y);
             return dx < this.viewportWidth * (1 + dynamicBuffer) &&
                    dy < this.viewportHeight * (1 + dynamicBuffer);
         });
@@ -45,10 +55,10 @@ class Camera {
         // Calculate target zoom based on nearby enemies
         if (nearbyEnemies.length > 0) {
             // Find the bounds of all relevant characters
-            let minX = player.x, maxX = player.x;
-            let minY = player.y, maxY = player.y;
-            let totalX = player.x;
-            let totalY = player.y;
+            let minX = targetCharacter.x, maxX = targetCharacter.x;
+            let minY = targetCharacter.y, maxY = targetCharacter.y;
+            let totalX = targetCharacter.x;
+            let totalY = targetCharacter.y;
             let characterCount = 1;
             
             nearbyEnemies.forEach(enemy => {
@@ -75,7 +85,7 @@ class Camera {
             this.targetX = avgX - this.viewportWidth/(2 * this.currentZoom);
             this.targetY = avgY - this.viewportHeight/(2 * this.currentZoom);
         } else {
-            // Return to default zoom and center on player
+            // Return to default zoom and center on target character
             this.targetZoom = DEFAULT_ZOOM;
             this.targetX = targetX;
             this.targetY = targetY;

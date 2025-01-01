@@ -36,15 +36,17 @@ class Minimap {
             });
         }
         
-        // Draw player (blue square)
-        const playerSize = 4;
-        ctx.fillStyle = 'blue';
-        ctx.fillRect(
-            mapX + player.x * this.scaleX,
-            mapY + player.y * this.scaleY,
-            playerSize,
-            playerSize
-        );
+        // Draw player only if alive
+        if (!player.isDead) {
+            const playerSize = 4;
+            ctx.fillStyle = 'blue';
+            ctx.fillRect(
+                mapX + player.x * this.scaleX,
+                mapY + player.y * this.scaleY,
+                playerSize,
+                playerSize
+            );
+        }
         
         // Draw enemies (colored squares)
         if (enemies && enemies.length > 0) {
@@ -54,8 +56,8 @@ class Minimap {
                     ctx.fillRect(
                         mapX + enemy.x * this.scaleX,
                         mapY + enemy.y * this.scaleY,
-                        playerSize,
-                        playerSize
+                        4,
+                        4
                     );
                 }
             });

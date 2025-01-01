@@ -1,11 +1,14 @@
-const BULLET_SPEED = 12.75;
+import { BULLET_SPEED } from './constants.js';
+import { debugControls } from './debug.js';
 
 // Utility function needed by Bullet
 function checkCollision(rect1, rect2) {
-    return rect1.x + rect1.width > rect2.x &&
-           rect1.x < rect2.x + rect2.width &&
-           rect1.y + rect1.height > rect2.y &&
-           rect1.y < rect2.y + rect2.height;
+    // Add a small buffer to make collisions more forgiving
+    const buffer = 2;
+    return rect1.x + buffer < rect2.x + rect2.width &&
+           rect1.x + rect1.width - buffer > rect2.x &&
+           rect1.y + buffer < rect2.y + rect2.height &&
+           rect1.y + rect1.height - buffer > rect2.y;
 }
 
 class Bullet {
@@ -13,18 +16,33 @@ class Bullet {
         this.x = x;
         this.y = y;
         this.radius = 4;
-        this.velocityX = direction * BULLET_SPEED;
+        this.velocityX = direction * BULLET_SPEED * (1/60); // Scale for one frame
         this.owner = owner;
         this.color = this.lightenColor(owner.color, 50);  // 50% lighter
+        // Add debug bounds
+        this.width = this.radius * 2;
+        this.height = this.radius * 2;
     }
 
     // Add method to lighten colors
     lightenColor(color, percent) {
         // Handle named colors
-        if (color === 'blue') color = '#0000FF';
-        if (color === 'red') color = '#FF0000';
-        if (color === 'green') color = '#008000';
-        if (color === 'purple') color = '#800080';
+        const colorMap = {
+            'blue': '#0000FF',
+            'red': '#FF0000',
+            'green': '#008000',
+            'purple': '#800080',
+            'orange': '#FFA500',
+            'yellow': '#FFD700',  // Using a darker yellow for better visibility
+            'cyan': '#00FFFF',
+            'magenta': '#FF00FF',
+            'brown': '#A52A2A'
+        };
+        
+        // Convert named color to hex if it exists in our map
+        if (colorMap[color]) {
+            color = colorMap[color];
+        }
         
         // Convert to RGB
         let hex = color.replace('#', '');
@@ -45,8 +63,12 @@ class Bullet {
         return `#${rr}${gg}${bb}`;
     }
 
-    update(timeScale) {
-        this.x += this.velocityX * timeScale;
+    update(timeStep) {
+        // Use fixed timestep for deterministic physics
+        this.x += this.velocityX;
+        // Update collision bounds
+        this.width = this.radius * 2;
+        this.height = this.radius * 2;
     }
 
     draw(ctx) {
@@ -61,6 +83,12 @@ class Bullet {
         ctx.fill();
         ctx.shadowBlur = 0;  // Reset shadow for other drawings
         ctx.closePath();
+
+        // Draw collision bounds for debugging
+        if (debugControls.debugBounds) {
+            ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+            ctx.strokeRect(this.x - this.radius, this.y - this.radius, this.width, this.height);
+        }
     }
 
     checkCollision(character) {
@@ -77,12 +105,26 @@ class Bullet {
             height: this.radius * 2
         };
 
-        const hasCollision = checkCollision(bulletRect, character);
+        const characterRect = {
+            x: character.x,
+            y: character.y,
+            width: character.width,
+            height: character.height
+        };
+
+        const hasCollision = checkCollision(bulletRect, characterRect);
+        
         if (hasCollision) {
-            console.log('Bullet hit character:', character.color, 'Hearts:', character.hearts);
+            console.log('Bullet collision detected:', {
+                bullet: bulletRect,
+                character: characterRect,
+                bulletColor: this.color,
+                characterColor: character.color
+            });
         }
+
         return hasCollision;
     }
 }
 
-export { Bullet, BULLET_SPEED }; 
+export { Bullet }; 
