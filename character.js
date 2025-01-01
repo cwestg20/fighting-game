@@ -11,6 +11,7 @@ import {
     SHOOT_COOLDOWN,
     DAMAGE_COOLDOWN
 } from './constants.js';
+import { characterSprite } from './assets.js';
 
 // Utility functions needed by Character
 function checkCollision(rect1, rect2) {
@@ -94,6 +95,9 @@ class Character {
     update(timeStep, deltaTime, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, keys, endGame, DeathBurst, effects, gameState) {
         if (this.dropCooldown > 0) {
             this.dropCooldown -= deltaTime;
+            if (this.dropCooldown <= 0) {
+                this.isDropping = false;
+            }
         }
 
         if (this.isFlashing) {
@@ -139,10 +143,6 @@ class Character {
                 this.hasRush = true;
                 this.jumpHoldTime = 0;
             }
-        }
-
-        if (this.isDropping && this.dropCooldown <= 0) {
-            this.isDropping = false;
         }
 
         if (this.y + this.height > WORLD_HEIGHT) {
@@ -197,42 +197,58 @@ class Character {
             ctx.shadowBlur = 0;
         }
         
+        // Save context for transformations
+        ctx.save();
+        
+        // Position at character location
+        ctx.translate(this.x + this.width/2, this.y);
+        
+        // Flip horizontally if facing right
+        if (this.direction > 0) {
+            ctx.scale(-1, 1);
+        }
+        
+        // Draw the sprite
+        ctx.translate(-this.width/2, 0);
+        
+        // Create a temporary canvas for tinting
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = this.width;
+        tempCanvas.height = this.height;
+        const tempCtx = tempCanvas.getContext('2d');
+        
+        // Draw sprite to temp canvas
+        tempCtx.drawImage(characterSprite, 0, 0, this.width, this.height);
+        
+        // Apply color tint using overlay blend mode
+        tempCtx.globalCompositeOperation = 'overlay';
+        tempCtx.globalAlpha = 0.7; // Reduce opacity to 70%
+        tempCtx.fillStyle = this.color;
+        tempCtx.fillRect(0, 0, this.width, this.height);
+        
+        // Restore original alpha values
+        tempCtx.globalCompositeOperation = 'destination-in';
+        tempCtx.drawImage(characterSprite, 0, 0, this.width, this.height);
+        
+        // Draw the tinted sprite
+        ctx.drawImage(tempCanvas, 0, 0);
+        
         // Calculate flash opacity if flashing
-        let flashOpacity = 0;
         if (this.isFlashing) {
-            // Create a faster blinking effect (8 blinks per second)
+            // Create a faster blinking effect (4 blinks per second)
             const blinkFrequency = 4;
             const normalizedTime = (this.flashTimeLeft / DAMAGE_COOLDOWN) * Math.PI * 2 * blinkFrequency;
-            flashOpacity = Math.sin(normalizedTime) * 0.5 + 0.5; // Oscillate between 0 and 1
-        }
-        
-        // Draw character with flash overlay
-        ctx.fillStyle = this.color;
-        ctx.fillRect(this.x, this.y, this.width, this.height);
-        
-        if (flashOpacity > 0) {
+            const flashOpacity = Math.sin(normalizedTime) * 0.5 + 0.5; // Oscillate between 0 and 1
+            
+            // Apply flash overlay
+            ctx.globalCompositeOperation = 'source-atop';
             ctx.fillStyle = `rgba(255, 255, 255, ${flashOpacity * 0.7})`; // Max opacity of 0.7
-            ctx.fillRect(this.x, this.y, this.width, this.height);
+            ctx.fillRect(0, 0, this.width, this.height);
         }
         
-        const triangleSize = 15;
-        ctx.beginPath();
-        if (this.direction > 0) {
-            ctx.moveTo(this.x + this.width, this.y + this.height/2);
-            ctx.lineTo(this.x + this.width - triangleSize, this.y + this.height/2 - triangleSize);
-            ctx.lineTo(this.x + this.width - triangleSize, this.y + this.height/2 + triangleSize);
-        } else {
-            ctx.moveTo(this.x, this.y + this.height/2);
-            ctx.lineTo(this.x + triangleSize, this.y + this.height/2 - triangleSize);
-            ctx.lineTo(this.x + triangleSize, this.y + this.height/2 + triangleSize);
-        }
-        ctx.closePath();
-        ctx.fillStyle = 'white';
-        ctx.fill();
+        ctx.restore();
         
-        ctx.shadowColor = 'transparent';
-        ctx.shadowBlur = 0;
-        
+        // Draw hearts
         for (let i = 0; i < this.hearts; i++) {
             ctx.fillStyle = 'red';
             ctx.fillText('♥', this.x + (i * 15), this.y - 10);
@@ -276,9 +292,9 @@ class Character {
     }
 
     drop() {
-        if (!this.isDropping && this.velocityY === 0) {
+        if (this.velocityY === 0) {
             this.isDropping = true;
-            this.dropCooldown = 250;
+            this.dropCooldown = 0.25;
             this.velocityY = 1;
         }
     }

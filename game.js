@@ -18,6 +18,7 @@ import { CharacterManager } from './characterManager.js';
 import { GameState } from './gameState.js';
 import { Random } from './random.js';
 import { FIXED_TIMESTEP, MAX_HEARTS } from './constants.js';
+import { characterSprite } from './assets.js';
 
 // Game loop constants
 const FRAME_RATE = 60;
@@ -674,6 +675,10 @@ window.onload = function() {
         }
     });
     
-    // Initialize game
-    initializeGame();
+    // Wait for sprite to load before starting game
+    if (characterSprite.complete) {
+        initializeGame();
+    } else {
+        characterSprite.onload = initializeGame;
+    }
 }; 
