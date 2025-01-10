@@ -8,173 +8,125 @@ const PERSONALITIES = {
 };
 
 class CharacterManager {
-    constructor(enemies, Character, WORLD_WIDTH, WORLD_HEIGHT, effects) {
+    constructor(enemies, Character, worldWidth, worldHeight, effects) {
         this.enemies = enemies;
         this.Character = Character;
-        this.WORLD_WIDTH = WORLD_WIDTH;
-        this.WORLD_HEIGHT = WORLD_HEIGHT;
+        this.worldWidth = worldWidth;
+        this.worldHeight = worldHeight;
         this.effects = effects;
+        this.networkPlayers = new Map(); // Store network players with their IDs
+        this.availableColors = ['orange', 'cyan', 'magenta', 'yellow', 'brown']; // Colors for network players
+        
+        // Initialize character list
         this.characterList = document.getElementById('character-list');
-        this.addButton = document.getElementById('add-character');
-        
-        // Initialize UI
-        this.setupUI();
-        
-        // Update initial character list
         this.updateCharacterList();
     }
-    
-    setupUI() {
-        if (!this.addButton) return;
-        this.addButton.addEventListener('click', () => this.addCharacter());
-        this.updateAddButtonState();
+
+    getUniqueColor() {
+        // Get all currently used colors
+        const usedColors = new Set([
+            ...this.enemies.map(enemy => enemy.color),
+            ...Array.from(this.networkPlayers.values()).map(player => player.color)
+        ]);
+        
+        // Find first available color
+        return this.availableColors.find(color => !usedColors.has(color)) || 
+               `hsl(${Math.random() * 360}, 70%, 50%)`; // Fallback to random HSL
     }
-    
-    createCharacterEntry(enemy, index) {
+
+    addNetworkPlayer(playerId) {
+        if (!this.networkPlayers.has(playerId)) {
+            this.networkPlayers.set(playerId, {
+                id: playerId,
+                color: this.getUniqueColor(),
+                isConnected: true
+            });
+            this.updateCharacterList();
+        }
+    }
+
+    removeNetworkPlayer(playerId) {
+        if (this.networkPlayers.has(playerId)) {
+            this.networkPlayers.delete(playerId);
+            this.updateCharacterList();
+        }
+    }
+
+    updateNetworkPlayerStatus(playerId, isConnected) {
+        const player = this.networkPlayers.get(playerId);
+        if (player) {
+            player.isConnected = isConnected;
+            this.updateCharacterList();
+        }
+    }
+
+    createCharacterEntry(character, isAI = true) {
         const entry = document.createElement('div');
         entry.className = 'character-entry';
         
-        // Create title
-        const title = document.createElement('div');
-        title.className = 'character-title';
-        title.textContent = `Character ${index + 1}`;
-        entry.appendChild(title);
-        
-        // Create color row
-        const colorRow = document.createElement('div');
-        colorRow.className = 'character-row';
-        
-        // Create color indicator
-        const colorIndicator = document.createElement('div');
-        colorIndicator.className = 'color-indicator';
-        colorIndicator.style.backgroundColor = enemy.color;
-        colorRow.appendChild(colorIndicator);
-        
-        // Create remove button
-        const removeButton = document.createElement('button');
-        removeButton.className = 'remove-character';
-        removeButton.textContent = '×';
-        removeButton.tabIndex = -1;
-        removeButton.addEventListener('click', () => {
-            this.removeCharacter(index);
-        });
-        colorRow.appendChild(removeButton);
-        
-        entry.appendChild(colorRow);
-        
-        // Create personality row
-        const personalityRow = document.createElement('div');
-        personalityRow.className = 'character-row';
-        
-        const select = document.createElement('select');
-        select.className = 'personality-select';
-        select.tabIndex = -1;
-        
-        // Add personality options
-        Object.entries(PERSONALITIES).forEach(([key, personality]) => {
-            const option = document.createElement('option');
-            option.value = key;
-            option.textContent = personality.name;
-            select.appendChild(option);
-        });
-        
-        // Set current personality
-        select.value = enemy.personality || 'default';
-        
-        // Add change listener
-        select.addEventListener('change', (e) => {
-            enemy.personality = e.target.value;
-            e.target.blur();  // Remove focus
-        });
-        
-        personalityRow.appendChild(select);
-        entry.appendChild(personalityRow);
+        if (isAI) {
+            // Create AI character entry (existing code)
+            entry.innerHTML = `
+                <div class="character-title">AI Character</div>
+                <div class="character-row">
+                    <div class="color-indicator" style="background-color: ${character.color}"></div>
+                    <select class="personality-select">
+                        <option value="default">Default</option>
+                        <option value="stationary">Stationary</option>
+                    </select>
+                    <button class="remove-character">×</button>
+                </div>
+            `;
+            
+            // Add event listeners for AI controls
+            const select = entry.querySelector('.personality-select');
+            select.value = character.personality || 'default';
+            select.addEventListener('change', (e) => {
+                character.personality = e.target.value;
+            });
+            
+            const removeButton = entry.querySelector('.remove-character');
+            removeButton.addEventListener('click', () => {
+                const index = this.enemies.indexOf(character);
+                if (index > -1) {
+                    this.enemies.splice(index, 1);
+                    this.updateCharacterList();
+                }
+            });
+        } else {
+            // Create network player entry (simpler version)
+            const status = character.isConnected ? 'Connected' : 'Disconnected';
+            const statusClass = character.isConnected ? 'connected' : 'disconnected';
+            
+            entry.innerHTML = `
+                <div class="character-title">Player ${character.id.slice(0, 4)}...</div>
+                <div class="character-row">
+                    <div class="color-indicator" style="background-color: ${character.color}"></div>
+                    <span class="player-status ${statusClass}">${status}</span>
+                </div>
+            `;
+        }
         
         return entry;
     }
-    
+
     updateCharacterList() {
-        // Clear current list
-        this.characterList.innerHTML = '';
+        // Clear the list
+        while (this.characterList.firstChild) {
+            this.characterList.removeChild(this.characterList.firstChild);
+        }
         
-        // Add entry for each enemy that isn't dead
-        this.enemies.filter(enemy => !enemy.isDead).forEach((enemy, index) => {
-            this.characterList.appendChild(this.createCharacterEntry(enemy, index));
+        // Add AI characters
+        this.enemies.forEach(enemy => {
+            if (!enemy.isPlayer) {
+                this.characterList.appendChild(this.createCharacterEntry(enemy, true));
+            }
         });
         
-        this.updateAddButtonState();
-    }
-    
-    updateAddButtonState() {
-        this.addButton.disabled = this.enemies.filter(enemy => !enemy.isDead).length >= MAX_CHARACTERS;
-    }
-    
-    addCharacter() {
-        const aliveEnemies = this.enemies.filter(enemy => !enemy.isDead);
-        if (aliveEnemies.length >= MAX_CHARACTERS) return;
-        
-        // Calculate spawn position near center
-        const centerX = this.WORLD_WIDTH / 2;
-        const centerY = this.WORLD_HEIGHT / 2;
-        const spawnRadius = 300; // Random spawn within this radius from center
-        
-        // Random angle and distance within spawn radius
-        const angle = Math.random() * Math.PI * 2;
-        const distance = Math.random() * spawnRadius;
-        
-        // Calculate spawn position using polar coordinates
-        const spawnX = centerX + Math.cos(angle) * distance;
-        const spawnY = centerY + Math.sin(angle) * distance;
-        
-        // Create new enemy at spawn position
-        const newEnemy = new this.Character(
-            spawnX,
-            spawnY,
-            CHARACTER_COLORS[aliveEnemies.length]
-        );
-        
-        // Initialize required properties
-        newEnemy.isDead = false;
-        newEnemy.movementGoal = {
-            x: spawnX,
-            y: spawnY,
-            timeLeft: 120
-        };
-        newEnemy.hearts = 5;
-        newEnemy.isPlayer = false;
-        newEnemy.personality = 'default';  // Set default personality
-        
-        // Add to enemies array
-        this.enemies.push(newEnemy);
-        
-        // Update UI
-        this.updateCharacterList();
-    }
-    
-    removeCharacter(index) {
-        // Get the actual enemy from the list of alive enemies
-        const aliveEnemies = this.enemies.filter(enemy => !enemy.isDead);
-        const enemy = aliveEnemies[index];
-        
-        if (enemy) {
-            // Find the index in the original array
-            const originalIndex = this.enemies.indexOf(enemy);
-            if (originalIndex !== -1) {
-                // Remove from the original array
-                this.enemies.splice(originalIndex, 1);
-                
-                // Create death burst effect
-                const deathBurst = new DeathBurst(
-                    enemy.x + enemy.width/2,
-                    enemy.y + enemy.height/2,
-                    enemy.color
-                );
-                this.effects.push(deathBurst);
-                
-                // Update UI to reflect the new state
-                this.updateCharacterList();
-            }
-        }
+        // Add network players
+        this.networkPlayers.forEach(player => {
+            this.characterList.appendChild(this.createCharacterEntry(player, false));
+        });
     }
 }
 

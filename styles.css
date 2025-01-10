@@ -281,4 +281,33 @@ body {
 .add-character-btn:disabled {
     background: #666;
     cursor: not-allowed;
+}
+
+.network-status {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    padding: 5px 10px;
+    background-color: rgba(0, 0, 0, 0.7);
+    color: white;
+    border-radius: 4px;
+    font-size: 14px;
+    z-index: 1000;
+}
+
+.player-status {
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 12px;
+    margin-left: 8px;
+}
+
+.player-status.connected {
+    background-color: rgba(76, 175, 80, 0.3);
+    color: #4CAF50;
+}
+
+.player-status.disconnected {
+    background-color: rgba(244, 67, 54, 0.3);
+    color: #f44336;
 } 

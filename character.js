@@ -173,7 +173,8 @@ class Character {
                         effects.push(new DeathBurst(
                             this.x + this.width/2,
                             this.y + this.height/2,
-                            this.color
+                            this.color,
+                            gameState
                         ));
                     }
                     if (this.isPlayer) {

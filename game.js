@@ -19,6 +19,19 @@ import { GameState } from './gameState.js';
 import { Random } from './random.js';
 import { FIXED_TIMESTEP, MAX_HEARTS } from './constants.js';
 import { characterSprite } from './assets.js';
+import { NetworkManager } from './networkManager.js';
+
+// Game constants
+const CHARACTER_COLORS = ['red', 'green', 'purple', 'orange', 'yellow', 'cyan', 'magenta', 'brown'];
+const WORLD_WIDTH = 1280 * 3;
+const WORLD_HEIGHT = 720 * 3;
+const VIEWPORT_WIDTH = 1280;
+const VIEWPORT_HEIGHT = 720;
+const CAMERA_BUFFER = 200;
+const MINIMAP_WIDTH = 200;
+const MINIMAP_HEIGHT = 150;
+const MINIMAP_MARGIN = 10;
+const SPHERE_SHRINK_RATE = 0.5;
 
 // Game loop constants
 const FRAME_RATE = 60;
@@ -35,6 +48,8 @@ class GameLoop {
         this.fixedTimeStep = FIXED_TIMESTEP / 1000; // Convert ms to seconds
         this.gameState = new GameState(INITIAL_SEED);
         this.isVisible = true;
+        this.isRunning = false;
+        this.animationFrameId = null;
 
         // Add visibility change listener
         document.addEventListener('visibilitychange', () => {
@@ -48,13 +63,24 @@ class GameLoop {
     }
 
     start() {
+        this.isRunning = true;
         this.lastUpdateTime = performance.now() / 1000; // Convert to seconds
         this.loop();
     }
 
+    stop() {
+        this.isRunning = false;
+        if (this.animationFrameId) {
+            cancelAnimationFrame(this.animationFrameId);
+            this.animationFrameId = null;
+        }
+    }
+
     loop() {
+        if (!this.isRunning) return;
+
         if (!this.isVisible) {
-            requestAnimationFrame(() => this.loop());
+            this.animationFrameId = requestAnimationFrame(() => this.loop());
             return;
         }
 
@@ -81,12 +107,12 @@ class GameLoop {
 
         // Render can interpolate between states if needed
         this.game.render();
-        requestAnimationFrame(() => this.loop());
+        this.animationFrameId = requestAnimationFrame(() => this.loop());
     }
 }
 
 // Initialize variables at the top
-let canvas, ctx, healthDisplay;
+let canvas, ctx, healthDisplay, networkStatus;
 let player, enemies, bullets;
 let gameOver = false;
 let sphereRadius;
@@ -99,17 +125,8 @@ let currentMap = 'default'; // Track current map
 let characterManager; // Add character manager variable
 let gameLoop; // Add game loop variable
 let gameState; // Add game state variable
-
-// Game constants
-const WORLD_WIDTH = 1280 * 3;
-const WORLD_HEIGHT = 720 * 3;
-const VIEWPORT_WIDTH = 1280;
-const VIEWPORT_HEIGHT = 720;
-const CAMERA_BUFFER = 200;
-const MINIMAP_WIDTH = 200;
-const MINIMAP_HEIGHT = 150;
-const MINIMAP_MARGIN = 10;
-const SPHERE_SHRINK_RATE = 0.5;
+let networkManager; // Add network manager variable
+let currentCameraTarget = null; // Track current camera target
 
 // Create platforms array after centerX is initialized
 let platforms = [];
@@ -387,12 +404,36 @@ function endGame() {
     document.getElementById('game-over').classList.remove('hidden');
 }
 
-function restartGame() {
-    initializeGame();
+function respawnPlayer() {
+    // Only allow respawn if game over screen is visible
+    if (!document.getElementById('game-over').classList.contains('hidden')) {
+        // Hide game over screen
+        document.getElementById('game-over').classList.add('hidden');
+        
+        // Respawn player
+        player.x = 200;
+        player.y = WORLD_HEIGHT - 100;
+        player.velocityX = 0;
+        player.velocityY = 0;
+        player.hearts = MAX_HEARTS;
+        player.isDead = false;
+        player.isFlashing = false;
+        player.flashTimeLeft = 0;
+        player.hasDoubleJump = true;
+        player.hasRush = true;
+        player.isRushing = false;
+        player.rushTimeLeft = 0;
+        player.jumpHoldTime = 0;
+        player.isDropping = false;
+        player.dropCooldown = 0;
+        
+        // Reset camera target to player
+        currentCameraTarget = player;
+    }
 }
 
-// Add restartGame to window object
-window.restartGame = restartGame;
+// Add respawnPlayer to window object
+window.respawnPlayer = respawnPlayer;
 
 function render() {
     ctx.clearRect(0, 0, VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
@@ -451,9 +492,51 @@ function initializeGame() {
     // Reset game state
     gameOver = false;
     document.getElementById('game-over').classList.add('hidden');
+    currentCameraTarget = null;  // Reset camera target
     
     // Initialize game state with seed
     gameState = new GameState(INITIAL_SEED);
+    
+    // Initialize network manager if not already initialized
+    if (!networkManager) {
+        networkManager = new NetworkManager(gameLoop);
+        networkManager.onConnectionStatusChange = (status) => {
+            if (networkStatus) {
+                networkStatus.textContent = status;
+            }
+            // Join game when connected
+            if (status === 'Connected to server') {
+                networkManager.joinGame();
+            }
+        };
+        
+        // Add handlers for player join/leave events
+        networkManager.onPlayersUpdate = (players) => {
+            console.log('Players update:', players);
+            players.forEach(player => {
+                if (player.ready) {
+                    characterManager.addNetworkPlayer(player.id);
+                }
+            });
+            
+            // Remove players that aren't in the update
+            const currentIds = new Set(players.map(p => p.id));
+            Array.from(characterManager.networkPlayers.keys()).forEach(id => {
+                if (!currentIds.has(id)) {
+                    characterManager.removeNetworkPlayer(id);
+                }
+            });
+        };
+
+        // Handle room join confirmation
+        networkManager.onRoomJoin = (roomId) => {
+            console.log('Joined room:', roomId);
+            // Send ready signal after joining room
+            networkManager.sendReady();
+        };
+        
+        networkManager.connect();
+    }
     
     // Initialize sphere radius
     sphereRadius = Math.min(canvas.width, canvas.height) * 3;
@@ -520,7 +603,21 @@ function initializeGame() {
 
 function fixedUpdate(timeStep, gameState) {
     // Remove the gameOver check so the game continues running
-    camera.update(player, enemies);
+    
+    // Update camera - follow a consistent target after player death
+    if (player.isDead) {
+        const aliveCharacters = enemies.filter(enemy => !enemy.isDead);
+        if (aliveCharacters.length > 0) {
+            // If we don't have a current target or our target died, pick a new one
+            if (!currentCameraTarget || currentCameraTarget.isDead) {
+                currentCameraTarget = aliveCharacters[Math.floor(gameState.random() * aliveCharacters.length)];
+            }
+            camera.update(currentCameraTarget, aliveCharacters);
+        }
+    } else {
+        currentCameraTarget = player;
+        camera.update(player, enemies);
+    }
     
     // Update game objects
     // Only update player if they're not dead
@@ -622,6 +719,7 @@ window.onload = function() {
     canvas = document.getElementById('gameCanvas');
     ctx = canvas.getContext('2d');
     healthDisplay = document.getElementById('health-display');
+    networkStatus = document.getElementById('network-status');
     
     // Set canvas size
     canvas.width = 1280;
@@ -643,10 +741,15 @@ window.onload = function() {
         e.stopPropagation();
     });
     
-    // Add reset button handler
-    document.getElementById('reset-button').addEventListener('click', (e) => {
-        initializeGame();
-        e.target.blur();  // Remove focus
+    // Add character button handler
+    document.getElementById('add-character').addEventListener('click', () => {
+        if (enemies.length < 8) {  // Max 8 characters
+            const x = 200 + Math.random() * (WORLD_WIDTH - 400);  // Random x position
+            const y = WORLD_HEIGHT - 100;  // Fixed y position near ground
+            const newEnemy = new Character(x, y, CHARACTER_COLORS[enemies.length % CHARACTER_COLORS.length]);
+            enemies.push(newEnemy);
+            characterManager.updateCharacterList();
+        }
     });
     
     // Prevent spacebar from triggering the add character button
@@ -657,10 +760,10 @@ window.onload = function() {
         }
     });
     
-    // Add keyboard shortcut for reset
+    // Add keyboard shortcut for respawn (only during game over)
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'r' || e.key === 'R') {
-            initializeGame();
+        if ((e.key === 'r' || e.key === 'R') && !document.getElementById('game-over').classList.contains('hidden')) {
+            respawnPlayer();
             // Also blur any active element to prevent spacebar from triggering buttons
             if (document.activeElement) {
                 document.activeElement.blur();
@@ -682,3 +785,36 @@ window.onload = function() {
         characterSprite.onload = initializeGame;
     }
 }; 
+
+socket.addEventListener('message', (event) => {
+    const message = JSON.parse(event.data);
+    console.log('Received message:', message);
+
+    switch (message.type) {
+        case 'roomInfo':
+            document.getElementById('room-id').textContent = `Room: ${message.roomId}`;
+            document.getElementById('matchmaking-status').textContent = 
+                message.isMatchmaking ? 'Status: Matchmaking...' : 'Status: Game in Progress';
+            updatePlayerList(message.players);
+            break;
+            
+        case 'playerJoined':
+            console.log(`Player ${message.playerId} joined`);
+            addPlayerToList(message.playerId);
+            break;
+            
+        case 'playerLeft':
+            console.log(`Player ${message.playerId} left`);
+            removePlayerFromList(message.playerId);
+            break;
+            
+        case 'gameState':
+            console.log('Received game state:', message);
+            document.getElementById('matchmaking-status').textContent = 'Status: Game in Progress';
+            updatePlayerList(message.players);
+            break;
+            
+        default:
+            console.log('Unknown message type:', message.type);
+    }
+}); 

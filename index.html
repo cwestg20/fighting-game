@@ -11,9 +11,10 @@
         <canvas id="gameCanvas" width="1280" height="720"></canvas>
         <div id="game-over" class="hidden">
             <h1>Game Over</h1>
-            <button onclick="restartGame()">Play Again</button>
+            <button onclick="respawnPlayer()">Play Again</button>
         </div>
         <div id="health-display"></div>
+        <div id="network-status" class="network-status">Not Connected</div>
         <div class="character-management">
             <button id="add-character" tabindex="-1" class="add-character-btn" onmousedown="event.preventDefault()">Add Character</button>
             <div id="character-list">
@@ -32,7 +33,6 @@
                         <option value="empty">Empty Arena</option>
                     </select>
                 </label>
-                <button id="reset-button" tabindex="-1">Reset Game (R)</button>
             </div>
             <div class="control-row">
                 <label><input type="checkbox" id="toggle-ai" checked tabindex="-1"> Enable AI</label>
