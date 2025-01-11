@@ -36,7 +36,8 @@ class Bullet {
             'yellow': '#FFD700',  // Using a darker yellow for better visibility
             'cyan': '#00FFFF',
             'magenta': '#FF00FF',
-            'brown': '#A52A2A'
+            'brown': '#A52A2A',
+            'gray': '#808080'  // Add gray to the color map
         };
         
         // Convert named color to hex if it exists in our map

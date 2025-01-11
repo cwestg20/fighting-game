@@ -168,10 +168,15 @@ export class NetworkManager {
                 } else {
                     // If we're not the host, request our color assignment
                     console.log('[NetworkManager] Not host, requesting color assignment');
+                    // Set local player color to gray temporarily
+                    if (this.gameLoop && this.gameLoop.characterManager && this.gameLoop.characterManager.player) {
+                        this.gameLoop.characterManager.player.color = 'gray';
+                        this.gameLoop.characterManager.updateCharacterList();
+                    }
                     this.ws.send(JSON.stringify({
                         type: 'requestColorAssignment',
                         playerId: this.playerId,
-                        roomId: this.roomId  // Add roomId to help server route the message
+                        roomId: this.roomId
                     }));
                 }
                 
@@ -227,11 +232,10 @@ export class NetworkManager {
                 if (targetPlayerId === this.playerId) {
                     console.log('[NetworkManager] Applying color to local player:', {
                         color: message.color,
-                        previousColor: characterManager.player?.color
+                        currentColor: characterManager.player?.color
                     });
                     if (characterManager.player) {
-                        characterManager.player.color = message.color;
-                        characterManager.playerColors.set(this.playerId, message.color);
+                        characterManager.setPlayerColor(characterManager.player, message.color);
                         // Force a UI update
                         characterManager.updateCharacterList();
                     }
@@ -244,7 +248,7 @@ export class NetworkManager {
                     });
                     let networkPlayer = characterManager.networkPlayers.get(targetPlayerId);
                     if (networkPlayer) {
-                        networkPlayer.color = message.color;
+                        characterManager.setPlayerColor(networkPlayer, message.color);
                     }
                     // Store the color for when the player is created
                     characterManager.playerColors.set(targetPlayerId, message.color);
