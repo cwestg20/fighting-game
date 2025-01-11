@@ -1,6 +1,7 @@
 export class NetworkManager {
     constructor(gameLoop) {
         this.gameLoop = gameLoop;
+        this.gameState = gameLoop ? gameLoop.gameState : null;
         this.ws = null;
         this.playerId = null;
         this.roomId = null;
@@ -9,12 +10,70 @@ export class NetworkManager {
         this.ready = false;
         this.inputBuffer = new Map();
         this.lastProcessedInput = new Map();
+        this.isHost = false;
+        this.hostId = null;
 
         // UI callbacks
-        this.onConnectionStatusChange = null;
-        this.onRoomJoin = null;
-        this.onPlayersUpdate = null;
-        this.onGameStart = null;
+        this.onConnectionStatusChange = (status) => {
+            const networkStatus = document.getElementById('network-status');
+            if (networkStatus) {
+                networkStatus.textContent = status;
+            }
+            // Join game when connected
+            if (status === 'Connected to server') {
+                this.joinGame();
+            }
+        };
+
+        this.onRoomJoin = (roomId) => {
+            console.log('Joined room:', roomId);
+            this.sendReady();
+        };
+
+        this.onPlayersUpdate = (players) => {
+            console.log('Players update:', players);
+            if (this.gameLoop && this.gameLoop.characterManager) {
+                players.forEach(player => {
+                    if (player.ready) {
+                        this.gameLoop.characterManager.addNetworkPlayer(player.id);
+                    }
+                    // Update host status for existing players
+                    const existingPlayer = this.gameLoop.characterManager.networkPlayers.get(player.id);
+                    if (existingPlayer) {
+                        existingPlayer.isHost = player.isHost;
+                        this.gameLoop.characterManager.updateCharacterList();
+                    }
+                });
+
+                // Remove players that aren't in the update
+                const currentIds = new Set(players.map(p => p.id));
+                Array.from(this.gameLoop.characterManager.networkPlayers.keys()).forEach(id => {
+                    if (!currentIds.has(id)) {
+                        this.gameLoop.characterManager.removeNetworkPlayer(id);
+                    }
+                });
+            }
+        };
+
+        this.onHostUpdate = (hostId) => {
+            console.log('Host updated:', hostId);
+            const debugControlsElement = document.getElementById('debug-controls');
+            if (debugControlsElement) {
+                if (this.isHost) {
+                    debugControlsElement.classList.remove('disabled');
+                } else {
+                    debugControlsElement.classList.add('disabled');
+                }
+            }
+            
+            if (this.gameLoop && this.gameLoop.characterManager) {
+                // Update host status for all players
+                this.gameLoop.characterManager.networkPlayers.forEach((player, id) => {
+                    player.isHost = id === hostId;
+                });
+                this.gameLoop.characterManager.updateCharacterList();
+            }
+        };
     }
 
     connect() {
@@ -64,6 +123,9 @@ export class NetworkManager {
             case 'connected':
                 this.playerId = message.playerId;
                 console.log('Received player ID:', this.playerId);
+                if (this.onPlayerIdReceived) {
+                    this.onPlayerIdReceived(this.playerId);
+                }
                 break;
 
             case 'joinedRoom':
@@ -76,50 +138,100 @@ export class NetworkManager {
                 this.updatePlayerList();
                 break;
 
+            case 'hostUpdate':
+                console.log('Host update received:', message.hostId);
+                this.hostId = message.hostId;
+                this.isHost = this.playerId === message.hostId;
+                
+                // Update debug controls visibility based on host status
+                const debugControlsContainer = document.getElementById('debug-controls');
+                if (debugControlsContainer) {
+                    if (this.isHost) {
+                        debugControlsContainer.classList.remove('disabled');
+                    } else {
+                        debugControlsContainer.classList.add('disabled');
+                    }
+                }
+                
+                if (this.onHostUpdate) {
+                    this.onHostUpdate(message.hostId);
+                }
+
+                // Update local player's host status and trigger list update
+                if (this.gameLoop && this.gameLoop.characterManager) {
+                    const characterManager = this.gameLoop.characterManager;
+                    if (characterManager.player) {
+                        characterManager.player.isHost = this.isHost;
+                        console.log('Updated local player host status:', {
+                            playerId: characterManager.player.id,
+                            isHost: this.isHost
+                        });
+                    }
+                    characterManager.updateCharacterList();
+                }
+
+                this.updatePlayerList();
+                break;
+
             case 'playerJoined':
-                console.log('Player joined. Before update - Current players:', Array.from(this.players));
+                console.log('Player joined:', message.playerId);
                 this.players.add(message.playerId);
-                console.log('After adding player:', message.playerId, '- Current players:', Array.from(this.players));
+                if (message.isHost !== undefined) {
+                    console.log('Host status update:', { playerId: message.playerId, isHost: message.isHost });
+                    this.handleHostUpdate(message.playerId, message.isHost);
+                }
                 this.updatePlayerList();
                 break;
 
             case 'playerLeft':
-                console.log('Player left. Before update - Current players:', Array.from(this.players));
+                console.log('Player left:', message.playerId);
                 this.players.delete(message.playerId);
-                console.log('After removing player:', message.playerId, '- Current players:', Array.from(this.players));
+                // Log network players state before removal
+                console.log('Network players before removal:', this.gameState.networkPlayers);
+                this.gameState.removeNetworkPlayer(message.playerId);
+                console.log('Network players after removal:', this.gameState.networkPlayers);
                 this.updatePlayerList();
                 break;
 
             case 'gameStart':
                 console.log('Game starting with players:', message.players);
-                // Update our player set to match the game start state
                 this.players = new Set(message.players);
-                console.log('Updated player set for game start:', Array.from(this.players));
-                this.startGame(message.players, message.timestamp);
+                this.hostId = message.hostId;
+                this.isHost = this.playerId === message.hostId;
                 if (this.onGameStart) {
                     this.onGameStart();
                 }
                 break;
 
             case 'playerInput':
-                this.inputBuffer.set(message.frame, {
-                    playerId: message.playerId,
-                    input: message.input
-                });
+                this.handlePlayerInput(message.playerId, message.frame, message.input);
                 break;
 
             case 'stateUpdate':
                 this.handleStateUpdate(message.frame, message.state);
+                break;
+
+            case 'gameState':
+                console.log('Received game state update. Network players:', 
+                    Array.from(message.state.networkPlayers.entries())
+                        .map(([id, player]) => ({
+                            id,
+                            x: player.x,
+                            y: player.y
+                        }))
+                );
+                // ... rest of the gameState handling
                 break;
         }
     }
 
     updatePlayerList() {
         if (this.onPlayersUpdate) {
-            // Convert players Set to array of player objects
             const playerList = Array.from(this.players).map(id => ({
                 id,
-                ready: true
+                ready: true,
+                isHost: id === this.hostId,
+                isConnected: true
             }));
             console.log('Updating player list. Current players:', playerList);
             this.onPlayersUpdate(playerList);
@@ -168,11 +280,31 @@ export class NetworkManager {
     }
 
     handleStateUpdate(frame, state) {
+        console.log('Received state update:', {
+            frame,
+            networkPlayers: Array.from(state.networkPlayers.entries()).map(([id, player]) => ({
+                id,
+                x: player.x,
+                y: player.y,
+                hearts: player.hearts,
+                isFlashing: player.isFlashing
+            }))
+        });
+
         // Compare received state with local prediction
         const localState = this.gameLoop.stateManager.getState(frame);
         if (localState && !this.gameLoop.stateManager.statesMatch(localState, state)) {
             // State mismatch detected, trigger rollback
-            console.log('State mismatch detected at frame', frame);
+            console.log('State mismatch detected at frame', frame, {
+                local: {
+                    networkPlayers: Array.from(localState.networkPlayers.entries()),
+                    player: localState.player
+                },
+                remote: {
+                    networkPlayers: Array.from(state.networkPlayers.entries()),
+                    player: state.player
+                }
+            });
             this.gameLoop.stateManager.rollback(frame, this.gameLoop);
         }
     }

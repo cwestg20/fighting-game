@@ -1,6 +1,7 @@
 // Import Platform class
 import Platform from './platform.js';
-import { Character, MOVE_SPEED } from './character.js';
+import { Character } from './character.js';
+import { MOVE_SPEED } from './constants.js';
 import { Bullet } from './bullet.js';
 import { DeathBurst } from './effects.js';
 import { Camera } from './camera.js';
@@ -46,7 +47,8 @@ class GameLoop {
         this.frameDelta = 0;
         this.frameNumber = 0;
         this.fixedTimeStep = FIXED_TIMESTEP / 1000; // Convert ms to seconds
-        this.gameState = new GameState(INITIAL_SEED);
+        this.gameState = null;
+        this.characterManager = null;
         this.isVisible = true;
         this.isRunning = false;
         this.animationFrameId = null;
@@ -427,6 +429,9 @@ function respawnPlayer() {
         player.isDropping = false;
         player.dropCooldown = 0;
         
+        // Reset input handler
+        inputHandler.setCharacter(player);
+        
         // Reset camera target to player
         currentCameraTarget = player;
     }
@@ -458,6 +463,13 @@ function render() {
         player.draw(ctx);
     }
     
+    // Draw network players
+    for (const [playerId, networkPlayer] of gameState.networkPlayers) {
+        if (networkPlayer && !networkPlayer.isDead) {
+            networkPlayer.draw(ctx);
+        }
+    }
+    
     // Draw enemies (only if they're alive)
     enemies.forEach(enemy => {
         if (!enemy.isDead) {
@@ -481,7 +493,12 @@ function render() {
     
     // Draw minimap if enabled
     if (debugControls.minimap) {
-        minimap.draw(ctx, VIEWPORT_WIDTH, player, enemies, platforms, sphereRadius);
+        const allCharacters = [...enemies];
+        // Add network players to the list
+        gameState.networkPlayers.forEach(player => {
+            allCharacters.push(player);
+        });
+        minimap.draw(ctx, VIEWPORT_WIDTH, player, allCharacters, platforms, sphereRadius);
     }
 }
 
@@ -496,47 +513,16 @@ function initializeGame() {
     
     // Initialize game state with seed
     gameState = new GameState(INITIAL_SEED);
-    
-    // Initialize network manager if not already initialized
-    if (!networkManager) {
-        networkManager = new NetworkManager(gameLoop);
-        networkManager.onConnectionStatusChange = (status) => {
-            if (networkStatus) {
-                networkStatus.textContent = status;
-            }
-            // Join game when connected
-            if (status === 'Connected to server') {
-                networkManager.joinGame();
-            }
-        };
-        
-        // Add handlers for player join/leave events
-        networkManager.onPlayersUpdate = (players) => {
-            console.log('Players update:', players);
-            players.forEach(player => {
-                if (player.ready) {
-                    characterManager.addNetworkPlayer(player.id);
-                }
-            });
-            
-            // Remove players that aren't in the update
-            const currentIds = new Set(players.map(p => p.id));
-            Array.from(characterManager.networkPlayers.keys()).forEach(id => {
-                if (!currentIds.has(id)) {
-                    characterManager.removeNetworkPlayer(id);
-                }
-            });
-        };
 
-        // Handle room join confirmation
-        networkManager.onRoomJoin = (roomId) => {
-            console.log('Joined room:', roomId);
-            // Send ready signal after joining room
-            networkManager.sendReady();
-        };
-        
-        networkManager.connect();
-    }
+    // Initialize canvas and context
+    canvas = document.getElementById('gameCanvas');
+    ctx = canvas.getContext('2d');
+    healthDisplay = document.getElementById('health-display');
+    networkStatus = document.getElementById('network-status');
+    
+    // Set canvas size
+    canvas.width = VIEWPORT_WIDTH;
+    canvas.height = VIEWPORT_HEIGHT;
     
     // Initialize sphere radius
     sphereRadius = Math.min(canvas.width, canvas.height) * 3;
@@ -546,67 +532,131 @@ function initializeGame() {
     centerY = WORLD_HEIGHT / 2;
     safeRadius = sphereRadius * 0.7;
     
-    // Restore previous map selection
-    currentMap = previousMap;
-    
-    // Create platforms using current map
+    // Create platforms
     createPlatforms();
     
-    // Initialize camera
-    camera = new Camera(VIEWPORT_WIDTH, VIEWPORT_HEIGHT, WORLD_WIDTH, WORLD_HEIGHT);
+    // Initialize player
+    player = new Character(200, WORLD_HEIGHT - 100, 'blue', true);
+    player.isPlayer = true;
+    // player.id will be set when received from network
     
-    // Initialize minimap
-    minimap = new Minimap(MINIMAP_WIDTH, MINIMAP_HEIGHT, MINIMAP_MARGIN, WORLD_WIDTH, WORLD_HEIGHT);
-    
-    // Spawn player in bottom-left corner
-    player = new Character(
-        200,
-        WORLD_HEIGHT - 100,
-        'blue',
-        true
-    );
-    
-    // Initialize input handler
-    inputHandler = new InputHandler(player);
-    
-    // Initialize enemies array with spread out positions
+    // Initialize enemies array with some default enemies
     enemies = [
-        new Character(WORLD_WIDTH - 400, WORLD_HEIGHT - 100, 'red'),      // Right side
-        new Character(centerX, WORLD_HEIGHT - 100, 'green'),              // Center
-        new Character(400, WORLD_HEIGHT - 100, 'purple')                  // Left side
+        new Character(WORLD_WIDTH - 200, WORLD_HEIGHT - 100, 'red'),
+        new Character(200, WORLD_HEIGHT - 100, 'green'),
+        new Character(WORLD_WIDTH - 200, WORLD_HEIGHT - 100, 'purple')
     ];
     
-    // Initialize character manager if not already initialized
-    if (!characterManager) {
-        characterManager = new CharacterManager(enemies, Character, WORLD_WIDTH, WORLD_HEIGHT, effects);
-    } else {
-        characterManager.enemies = enemies;  // Ensure reference is up to date
-        characterManager.updateCharacterList();
-    }
+    // Initialize input handler
+    inputHandler = new InputHandler();
+    inputHandler.setCharacter(player);
     
-    // Update map selector to reflect current map
-    const mapSelect = document.getElementById('map-select');
-    if (mapSelect) {
-        mapSelect.value = currentMap;
-    }
+    // Initialize camera
+    camera = new Camera(VIEWPORT_WIDTH, VIEWPORT_HEIGHT, WORLD_WIDTH, WORLD_HEIGHT, CAMERA_BUFFER);
     
-    bullets = [];
-    effects = [];
+    // Initialize minimap
+    minimap = new Minimap(MINIMAP_WIDTH, MINIMAP_HEIGHT, WORLD_WIDTH, WORLD_HEIGHT, MINIMAP_MARGIN);
+    
+    // Initialize character manager
+    characterManager = new CharacterManager(player, enemies);
     
     // Initialize game loop
     gameLoop = new GameLoop({
         fixedUpdate: fixedUpdate,
         render: render
     });
+    gameLoop.gameState = gameState;
+    gameLoop.characterManager = characterManager;
+
+    // Initialize debug controls
+    initializeDebugControls();
+
+    // Initialize network manager
+    networkManager = new NetworkManager(gameLoop);
+    window.networkManager = networkManager; // Make it globally accessible
+    
+    networkManager.onConnectionStatusChange = (status) => {
+        if (networkStatus) {
+            networkStatus.textContent = status;
+        }
+        // Join game when connected
+        if (status === 'Connected to server') {
+            networkManager.joinGame();
+        }
+    };
+    
+    // Handle when we receive our player ID
+    networkManager.onPlayerIdReceived = (playerId) => {
+        console.log('Received player ID:', playerId);
+        if (player) {
+            player.id = playerId;
+            characterManager.updateCharacterList();
+        }
+    };
+    
+    // Add handlers for player join/leave events
+    networkManager.onPlayersUpdate = (players) => {
+        console.log('Players update:', players);
+        // Set the player's ID when we get it from the network
+        if (networkManager.playerId && player && !player.id) {
+            player.id = networkManager.playerId;
+            characterManager.updateCharacterList();
+        }
+        players.forEach(player => {
+            if (player.ready) {
+                characterManager.addNetworkPlayer(player.id);
+            }
+            // Update host status for existing players
+            const existingPlayer = characterManager.networkPlayers.get(player.id);
+            if (existingPlayer) {
+                existingPlayer.isHost = player.isHost;
+                characterManager.updateCharacterList();
+            }
+        });
+    };
+
+    // Handle room join confirmation
+    networkManager.onRoomJoin = (roomId) => {
+        console.log('Joined room:', roomId);
+        // Send ready signal after joining room
+        networkManager.sendReady();
+    };
+
+    // Handle host updates
+    networkManager.onHostUpdate = (hostId) => {
+        console.log('Host updated:', hostId);
+        const debugControlsElement = document.getElementById('debug-controls');
+        if (debugControlsElement) {
+            if (networkManager.isHost) {
+                debugControlsElement.classList.remove('disabled');
+            } else {
+                debugControlsElement.classList.add('disabled');
+            }
+        }
+        
+        // Update host status for all players
+        characterManager.networkPlayers.forEach((player, id) => {
+            player.isHost = id === hostId;
+        });
+        characterManager.updateCharacterList();
+    };
+    
+    // Initialize bullets and effects arrays
+    bullets = [];
+    effects = [];
+    
+    // Start game loop
     gameLoop.start();
+    
+    // Connect to server
+    networkManager.connect();
 }
 
 function fixedUpdate(timeStep, gameState) {
-    // Remove the gameOver check so the game continues running
-    
     // Update camera - follow a consistent target after player death
     if (player.isDead) {
-        const aliveCharacters = enemies.filter(enemy => !enemy.isDead);
+        const aliveCharacters = [...enemies.filter(enemy => !enemy.isDead), 
+            ...Array.from(gameState.networkPlayers.values()).filter(p => !p.isDead)];
         if (aliveCharacters.length > 0) {
             // If we don't have a current target or our target died, pick a new one
             if (!currentCameraTarget || currentCameraTarget.isDead) {
@@ -616,7 +666,7 @@ function fixedUpdate(timeStep, gameState) {
         }
     } else {
         currentCameraTarget = player;
-        camera.update(player, enemies);
+        camera.update(player, [...enemies, ...Array.from(gameState.networkPlayers.values())]);
     }
     
     // Update game objects
@@ -625,6 +675,15 @@ function fixedUpdate(timeStep, gameState) {
         inputHandler.update(timeStep, player, bullets, Bullet, gameState);
     }
     player.update(timeStep, timeStep, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, inputHandler.isKeyPressed.bind(inputHandler), endGame, DeathBurst, effects, gameState);
+    
+    // Update network players
+    for (const [playerId, networkPlayer] of gameState.networkPlayers) {
+        if (networkPlayer && !networkPlayer.isDead) {
+            networkPlayer.update(timeStep, timeStep, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, 
+                () => false, // network players don't use local keyboard input
+                endGame, DeathBurst, effects, gameState);
+        }
+    }
     
     // Update and draw all enemies
     updateAI(timeStep, timeStep, gameState);
@@ -652,6 +711,25 @@ function fixedUpdate(timeStep, gameState) {
                         endGame();
                     }
                     return false; // Remove bullet only if damage was dealt
+                }
+            }
+            
+            // Check network player collisions
+            for (const [playerId, networkPlayer] of gameState.networkPlayers) {
+                if (!networkPlayer.isDead && bullet.checkCollision(networkPlayer)) {
+                    console.log('Bullet hit network player:', playerId);
+                    if (!networkPlayer.isFlashing && networkPlayer.takeDamage(gameState)) {
+                        if (networkPlayer.hearts <= 0) {
+                            networkPlayer.isDead = true;
+                            effects.push(new DeathBurst(
+                                networkPlayer.x + networkPlayer.width/2,
+                                networkPlayer.y + networkPlayer.height/2,
+                                networkPlayer.color,
+                                gameState
+                            ));
+                        }
+                        return false;
+                    }
                 }
             }
             
@@ -752,69 +830,6 @@ window.onload = function() {
         }
     });
     
-    // Prevent spacebar from triggering the add character button
-    document.getElementById('add-character').addEventListener('keydown', (e) => {
-        if (e.key === ' ' || e.code === 'Space') {
-            e.preventDefault();
-            e.stopPropagation();
-        }
-    });
-    
-    // Add keyboard shortcut for respawn (only during game over)
-    document.addEventListener('keydown', (e) => {
-        if ((e.key === 'r' || e.key === 'R') && !document.getElementById('game-over').classList.contains('hidden')) {
-            respawnPlayer();
-            // Also blur any active element to prevent spacebar from triggering buttons
-            if (document.activeElement) {
-                document.activeElement.blur();
-            }
-        }
-    });
-    
-    // Prevent spacebar from scrolling the page
-    window.addEventListener('keydown', (e) => {
-        if (e.key === ' ' || e.code === 'Space') {
-            e.preventDefault();
-        }
-    });
-    
-    // Wait for sprite to load before starting game
-    if (characterSprite.complete) {
-        initializeGame();
-    } else {
-        characterSprite.onload = initializeGame;
-    }
-}; 
-
-socket.addEventListener('message', (event) => {
-    const message = JSON.parse(event.data);
-    console.log('Received message:', message);
-
-    switch (message.type) {
-        case 'roomInfo':
-            document.getElementById('room-id').textContent = `Room: ${message.roomId}`;
-            document.getElementById('matchmaking-status').textContent = 
-                message.isMatchmaking ? 'Status: Matchmaking...' : 'Status: Game in Progress';
-            updatePlayerList(message.players);
-            break;
-            
-        case 'playerJoined':
-            console.log(`Player ${message.playerId} joined`);
-            addPlayerToList(message.playerId);
-            break;
-            
-        case 'playerLeft':
-            console.log(`Player ${message.playerId} left`);
-            removePlayerFromList(message.playerId);
-            break;
-            
-        case 'gameState':
-            console.log('Received game state:', message);
-            document.getElementById('matchmaking-status').textContent = 'Status: Game in Progress';
-            updatePlayerList(message.players);
-            break;
-            
-        default:
-            console.log('Unknown message type:', message.type);
-    }
-}); 
+    // Initialize game
+    initializeGame();
+};

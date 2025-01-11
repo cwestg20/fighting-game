@@ -39,39 +39,92 @@ function calculateFPS() {
 }
 
 function initializeDebugControls() {
+    // Initially disable debug controls container until host is determined
+    const debugControlsContainer = document.getElementById('debug-controls');
+    if (debugControlsContainer) {
+        debugControlsContainer.classList.add('disabled');
+    }
+
     // Add event listeners for debug controls
-    document.getElementById('toggle-ai').addEventListener('change', (e) => {
-        debugControls.ai = e.target.checked;
-        e.target.blur();  // Remove focus
-    });
-    document.getElementById('toggle-minimap').addEventListener('change', (e) => {
-        debugControls.minimap = e.target.checked;
-        e.target.blur();  // Remove focus
-    });
-    document.getElementById('toggle-sphere').addEventListener('change', (e) => {
-        debugControls.sphere = e.target.checked;
-        e.target.blur();  // Remove focus
-    });
-    document.getElementById('toggle-platform-collision').addEventListener('change', (e) => {
-        debugControls.platformCollision = e.target.checked;
-        e.target.blur();  // Remove focus
-    });
-    document.getElementById('toggle-bullet-collision').addEventListener('change', (e) => {
-        debugControls.bulletCollision = e.target.checked;
-        e.target.blur();  // Remove focus
-    });
-    document.getElementById('toggle-enemy-avoidance').addEventListener('change', (e) => {
-        debugControls.enemyAvoidance = e.target.checked;
-        e.target.blur();  // Remove focus
-    });
-    document.getElementById('toggle-debug-bounds').addEventListener('change', (e) => {
-        debugControls.debugBounds = e.target.checked;
-        e.target.blur();  // Remove focus
-    });
-    document.getElementById('toggle-immortal').addEventListener('change', (e) => {
-        debugControls.immortal = e.target.checked;
-        e.target.blur();  // Remove focus
-    });
+    const toggleAI = document.getElementById('toggle-ai');
+    if (toggleAI) {
+        toggleAI.checked = debugControls.ai;
+        toggleAI.addEventListener('change', (e) => {
+            debugControls.ai = e.target.checked;
+            console.log('AI toggle:', debugControls.ai);
+            e.target.blur();  // Remove focus
+        });
+    }
+
+    const toggleMinimap = document.getElementById('toggle-minimap');
+    if (toggleMinimap) {
+        toggleMinimap.checked = debugControls.minimap;
+        toggleMinimap.addEventListener('change', (e) => {
+            debugControls.minimap = e.target.checked;
+            console.log('Minimap toggle:', debugControls.minimap);
+            e.target.blur();
+        });
+    }
+
+    const toggleSphere = document.getElementById('toggle-sphere');
+    if (toggleSphere) {
+        toggleSphere.checked = debugControls.sphere;
+        toggleSphere.addEventListener('change', (e) => {
+            debugControls.sphere = e.target.checked;
+            console.log('Sphere toggle:', debugControls.sphere);
+            e.target.blur();
+        });
+    }
+
+    const togglePlatformCollision = document.getElementById('toggle-platform-collision');
+    if (togglePlatformCollision) {
+        togglePlatformCollision.checked = debugControls.platformCollision;
+        togglePlatformCollision.addEventListener('change', (e) => {
+            debugControls.platformCollision = e.target.checked;
+            console.log('Platform collision toggle:', debugControls.platformCollision);
+            e.target.blur();
+        });
+    }
+
+    const toggleBulletCollision = document.getElementById('toggle-bullet-collision');
+    if (toggleBulletCollision) {
+        toggleBulletCollision.checked = debugControls.bulletCollision;
+        toggleBulletCollision.addEventListener('change', (e) => {
+            debugControls.bulletCollision = e.target.checked;
+            console.log('Bullet collision toggle:', debugControls.bulletCollision);
+            e.target.blur();
+        });
+    }
+
+    const toggleEnemyAvoidance = document.getElementById('toggle-enemy-avoidance');
+    if (toggleEnemyAvoidance) {
+        toggleEnemyAvoidance.checked = debugControls.enemyAvoidance;
+        toggleEnemyAvoidance.addEventListener('change', (e) => {
+            debugControls.enemyAvoidance = e.target.checked;
+            console.log('Enemy avoidance toggle:', debugControls.enemyAvoidance);
+            e.target.blur();
+        });
+    }
+
+    const toggleDebugBounds = document.getElementById('toggle-debug-bounds');
+    if (toggleDebugBounds) {
+        toggleDebugBounds.checked = debugControls.debugBounds;
+        toggleDebugBounds.addEventListener('change', (e) => {
+            debugControls.debugBounds = e.target.checked;
+            console.log('Debug bounds toggle:', debugControls.debugBounds);
+            e.target.blur();
+        });
+    }
+
+    const toggleImmortal = document.getElementById('toggle-immortal');
+    if (toggleImmortal) {
+        toggleImmortal.checked = debugControls.immortal;
+        toggleImmortal.addEventListener('change', (e) => {
+            debugControls.immortal = e.target.checked;
+            console.log('Immortal toggle:', debugControls.immortal);
+            e.target.blur();
+        });
+    }
 }
 
 function drawFPS(ctx, x, y) {

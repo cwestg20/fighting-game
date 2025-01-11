@@ -152,9 +152,14 @@ export function deserializeEffect(data, DeathBurst) {
 }
 
 export function serializeGameState(state) {
-    return {
+    const serializedState = {
         player: serializeCharacter(state.player),
         enemies: state.enemies.map(serializeCharacter),
+        networkPlayers: Array.from(state.networkPlayers.entries()).map(([id, player]) => ({
+            id,
+            ...serializeCharacter(player)
+        })),
+        lastProcessedInputs: Array.from(state.lastProcessedInputs.entries()),
         bullets: state.bullets.map(serializeBullet),
         effects: state.effects.map(serializeEffect),
         sphereRadius: state.sphereRadius,
@@ -162,12 +167,28 @@ export function serializeGameState(state) {
         currentMap: state.currentMap,
         frameNumber: state.frameNumber
     };
+    
+    console.log('Serializing game state:', {
+        numNetworkPlayers: serializedState.networkPlayers.length,
+        networkPlayers: serializedState.networkPlayers.map(p => ({
+            id: p.id,
+            x: p.x,
+            y: p.y
+        }))
+    });
+    
+    return serializedState;
 }
 
 export function deserializeGameState(serializedState) {
     return {
         player: deserializeCharacter(serializedState.player),
         enemies: serializedState.enemies.map(deserializeCharacter),
+        networkPlayers: new Map(serializedState.networkPlayers.map(player => [
+            player.id,
+            deserializeCharacter(player)
+        ])),
+        lastProcessedInputs: new Map(serializedState.lastProcessedInputs),
         bullets: serializedState.bullets.map(deserializeBullet),
         effects: serializedState.effects.map(deserializeEffect),
         sphereRadius: serializedState.sphereRadius,

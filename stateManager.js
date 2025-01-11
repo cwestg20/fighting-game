@@ -108,6 +108,35 @@ export class StateManager {
             return false;
         }
 
+        // Compare network players
+        const players1 = Array.from(state1.networkPlayers.values());
+        const players2 = Array.from(state2.networkPlayers.values());
+        if (players1.length !== players2.length) {
+            return false;
+        }
+
+        // Sort players by ID to ensure consistent comparison
+        players1.sort((a, b) => a.id.localeCompare(b.id));
+        players2.sort((a, b) => a.id.localeCompare(b.id));
+
+        for (let i = 0; i < players1.length; i++) {
+            const player1 = players1[i];
+            const player2 = players2[i];
+            if (
+                player1.id !== player2.id ||
+                player1.x !== player2.x ||
+                player1.y !== player2.y ||
+                player1.velocityX !== player2.velocityX ||
+                player1.velocityY !== player2.velocityY ||
+                player1.hearts !== player2.hearts ||
+                player1.isFlashing !== player2.isFlashing ||
+                player1.isDead !== player2.isDead ||
+                player1.color !== player2.color
+            ) {
+                return false;
+            }
+        }
+
         // Compare enemies in detail
         for (let i = 0; i < state1.enemies.length; i++) {
             const enemy1 = state1.enemies[i];

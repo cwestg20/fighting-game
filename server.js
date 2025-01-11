@@ -27,6 +27,7 @@ class GameRoom {
         this.gameState = null;
         this.isMatchmaking = true;
         this.maxPlayers = 4;
+        this.hostId = null;  // Track current host
     }
 
     addPlayer(playerId, connection) {
@@ -40,6 +41,19 @@ class GameRoom {
             lastInputFrame: 0,
             inputs: new Map()
         });
+
+        // First player to join becomes host
+        if (!this.hostId) {
+            this.hostId = playerId;
+            console.log(`Player ${playerId} is now host of room ${this.id}`);
+        }
+
+        // Notify all players about the current host
+        this.broadcast({
+            type: 'hostUpdate',
+            hostId: this.hostId
+        });
+
         return true;
     }
 
@@ -48,8 +62,28 @@ class GameRoom {
         console.log('Room state before removal:');
         console.log('- isMatchmaking:', this.isMatchmaking);
         console.log('- players:', this.players.size);
+        console.log('- hostId:', this.hostId);
         
         this.players.delete(playerId);
+        
+        // Handle host migration if the host left
+        if (playerId === this.hostId) {
+            // Find a new host from remaining players
+            const remainingPlayers = Array.from(this.players.keys());
+            if (remainingPlayers.length > 0) {
+                // Randomly select a new host
+                this.hostId = remainingPlayers[Math.floor(Math.random() * remainingPlayers.length)];
+                console.log(`New host selected: ${this.hostId}`);
+                
+                // Notify all players about the new host
+                this.broadcast({
+                    type: 'hostUpdate',
+                    hostId: this.hostId
+                });
+            } else {
+                this.hostId = null;
+            }
+        }
         
         // If we have less than 2 players, reset to matchmaking state
         if (this.players.size < 2) {
@@ -69,6 +103,7 @@ class GameRoom {
         console.log('- isMatchmaking:', this.isMatchmaking);
         console.log('- players:', this.players.size);
         console.log('- hasConnectedPlayers:', hasConnectedPlayers);
+        console.log('- hostId:', this.hostId);
         
         // If no connected players, delete the room
         if (!hasConnectedPlayers) {
@@ -101,6 +136,7 @@ class GameRoom {
         console.log('Room state before game start:');
         console.log('- isMatchmaking:', this.isMatchmaking);
         console.log('- players:', this.players.size);
+        console.log('- hostId:', this.hostId);
         
         this.isMatchmaking = false;
         // Only include connected players in the game start message
@@ -112,6 +148,7 @@ class GameRoom {
         this.broadcast({
             type: 'gameStart',
             players: connectedPlayers,
+            hostId: this.hostId,
             timestamp: Date.now()
         });
         
