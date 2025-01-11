@@ -14,14 +14,120 @@ export class CharacterManager {
         this.enemies = enemies;
         this.networkPlayers = new Map();
         this.characterList = document.getElementById('character-list');
+        this.playerColors = new Map(); // Track assigned colors
         this.updateCharacterList();
     }
 
+    setPlayerColor(character, color) {
+        if (!character) return;
+        
+        console.log('[CharacterManager] Setting player color:', {
+            characterId: character.id,
+            oldColor: character.color,
+            newColor: color,
+            isLocalPlayer: character === this.player,
+            existingColors: Array.from(this.playerColors.entries())
+        });
+        
+        // Update the color in both places
+        character.color = color;
+        if (character.id) {
+            this.playerColors.set(character.id, color);
+            console.log(`[CharacterManager] Color set for player ${character.id}:`, color);
+        }
+        this.updateCharacterList();
+    }
+
+    assignColorToPlayer(playerId) {
+        console.log('[CharacterManager] Assigning color to player:', {
+            playerId,
+            existingColors: Array.from(this.playerColors.entries()),
+            localPlayerId: this.player?.id,
+            localPlayerColor: this.player?.color
+        });
+        
+        // If player already has a color, return it
+        if (this.playerColors.has(playerId)) {
+            const existingColor = this.playerColors.get(playerId);
+            console.log('[CharacterManager] Player already has color:', {
+                playerId,
+                color: existingColor
+            });
+            return existingColor;
+        }
+
+        // Get all used colors
+        const usedColors = new Set([
+            ...Array.from(this.playerColors.values()),
+            ...this.enemies.map(e => e.color)
+        ]);
+        
+        console.log('[CharacterManager] Finding available color:', {
+            usedColors: Array.from(usedColors),
+            availableColors: CHARACTER_COLORS.filter(color => !usedColors.has(color))
+        });
+        
+        // Find first available color
+        const availableColors = CHARACTER_COLORS.filter(color => !usedColors.has(color));
+        const assignedColor = availableColors[0] || 'gray';
+        
+        // Store the color assignment and update character if it exists
+        this.playerColors.set(playerId, assignedColor);
+        console.log('[CharacterManager] New color assigned:', {
+            playerId,
+            color: assignedColor,
+            allColors: Array.from(this.playerColors.entries())
+        });
+        
+        // Update the character's color if it exists
+        if (playerId === this.player?.id) {
+            console.log('[CharacterManager] Updating local player color:', {
+                playerId,
+                color: assignedColor,
+                oldColor: this.player.color
+            });
+            this.setPlayerColor(this.player, assignedColor);
+        } else {
+            const networkPlayer = this.networkPlayers.get(playerId);
+            if (networkPlayer) {
+                console.log('[CharacterManager] Updating network player color:', {
+                    playerId,
+                    color: assignedColor,
+                    oldColor: networkPlayer.color
+                });
+                this.setPlayerColor(networkPlayer, assignedColor);
+            }
+        }
+        
+        return assignedColor;
+    }
+
     addNetworkPlayer(playerId) {
+        console.log('[CharacterManager] Adding network player:', {
+            playerId,
+            localPlayerId: this.player?.id,
+            existingPlayers: Array.from(this.networkPlayers.keys()),
+            existingColors: Array.from(this.playerColors.entries())
+        });
+        
+        // Don't create network player for local player
+        if (playerId === this.player?.id) {
+            console.log('[CharacterManager] Skipping network player creation for local player:', playerId);
+            return;
+        }
+
         if (!this.networkPlayers.has(playerId)) {
-            console.log('Adding network player:', playerId);
-            const networkPlayer = new Character(200, 200, 'gray');
+            // Only get color from playerColors map, don't assign new ones if we're not the host
+            const playerColor = this.playerColors.get(playerId) || 'gray';
+            console.log('[CharacterManager] Creating network player:', {
+                playerId,
+                assignedColor: playerColor,
+                existingColor: this.playerColors.get(playerId)
+            });
+            
+            const networkPlayer = new Character(200, 200, playerColor);
             networkPlayer.id = playerId;
+            networkPlayer.isNetworkPlayer = true;
             this.networkPlayers.set(playerId, networkPlayer);
             this.updateCharacterList();
         }
@@ -29,8 +135,12 @@ export class CharacterManager {
 
     removeNetworkPlayer(playerId) {
         console.log('Removing network player:', playerId);
-        this.networkPlayers.delete(playerId);
-        this.updateCharacterList();
+        // Keep the color assignment even after player leaves
+        // this.playerColors.delete(playerId);
+        if (this.networkPlayers.has(playerId)) {
+            this.networkPlayers.delete(playerId);
+            this.updateCharacterList();
+        }
     }
 
     createCharacterEntry(character, isLocal = false, isNetworkPlayer = false) {
@@ -42,25 +152,25 @@ export class CharacterManager {
             const title = document.createElement('div');
             title.className = 'character-title';
             
-            // Only show one entry for the local player
-            if (isLocal && character.id === window.networkManager?.playerId) {
-                title.textContent = `You - Player ${character.id.substring(0, 8)}`;
+            // Get player ID if it exists, ensure it's a string, otherwise use a placeholder
+            const playerId = character.id ? String(character.id).substring(0, 8) : 'Connecting...';
+            
+            if (isLocal) {
+                title.textContent = character.id ? `You - Player ${playerId}` : 'You';
                 if (window.networkManager?.isHost) {
                     const hostBadge = document.createElement('span');
                     hostBadge.className = 'host-badge';
                     hostBadge.textContent = 'Host';
                     title.appendChild(hostBadge);
                 }
-            } else if (!isLocal && character.id !== window.networkManager?.playerId) {
-                title.textContent = `Player ${character.id.substring(0, 8)}`;
+            } else if (isNetworkPlayer) {
+                title.textContent = `Player ${playerId}`;
                 if (character.isHost) {
                     const hostBadge = document.createElement('span');
                     hostBadge.className = 'host-badge';
                     hostBadge.textContent = 'Host';
                     title.appendChild(hostBadge);
                 }
-            } else {
-                return null; // Skip duplicate entries
             }
             
             entry.appendChild(title);
@@ -118,13 +228,6 @@ export class CharacterManager {
             console.log('Character list element not found');
             return;
         }
-        
-        console.log('Updating character list:', {
-            player: this.player,
-            playerId: this.player?.id,
-            isHost: window.networkManager?.isHost,
-            networkPlayers: Array.from(this.networkPlayers.entries())
-        });
         
         // Clear the list
         this.characterList.innerHTML = '';

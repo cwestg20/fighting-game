@@ -118,11 +118,14 @@ export class NetworkManager {
     }
 
     handleMessage(message) {
-        console.log('Received message:', message);
+        // Only log non-state-update messages
+        if (message.type !== 'stateUpdate') {
+            console.log('Received message:', message);
+        }
         switch (message.type) {
             case 'connected':
                 this.playerId = message.playerId;
-                console.log('Received player ID:', this.playerId);
+                console.log('[NetworkManager] Player connected with ID:', this.playerId);
                 if (this.onPlayerIdReceived) {
                     this.onPlayerIdReceived(this.playerId);
                 }
@@ -131,11 +134,121 @@ export class NetworkManager {
             case 'joinedRoom':
                 this.roomId = message.roomId;
                 this.players = new Set(message.players);
-                console.log('Joined room:', this.roomId, 'with players:', Array.from(this.players));
+                console.log('[NetworkManager] Joined room:', {
+                    roomId: this.roomId,
+                    players: Array.from(this.players),
+                    isHost: this.isHost,
+                    newPlayerId: message.newPlayerId
+                });
+                
+                // If we're the host, assign colors to all players
+                if (this.isHost) {
+                    const characterManager = this.gameLoop.characterManager;
+                    console.log('[NetworkManager] Host assigning colors. Current colors:', {
+                        playerColors: Array.from(characterManager.playerColors.entries()),
+                        localPlayerId: this.playerId,
+                        localPlayerColor: characterManager.player?.color
+                    });
+                    
+                    // If there's a new player, assign them a color
+                    if (message.newPlayerId) {
+                        const assignedColor = characterManager.assignColorToPlayer(message.newPlayerId);
+                        console.log('[NetworkManager] Host assigned color:', {
+                            targetPlayer: message.newPlayerId,
+                            color: assignedColor
+                        });
+                        
+                        // Broadcast the color assignment to all players
+                        this.ws.send(JSON.stringify({
+                            type: 'colorAssignment',
+                            targetPlayerId: message.newPlayerId,
+                            color: assignedColor
+                        }));
+                    }
+                } else {
+                    // If we're not the host, request our color assignment
+                    console.log('[NetworkManager] Not host, requesting color assignment');
+                    this.ws.send(JSON.stringify({
+                        type: 'requestColorAssignment',
+                        playerId: this.playerId,
+                        roomId: this.roomId  // Add roomId to help server route the message
+                    }));
+                }
+                
                 if (this.onRoomJoin) {
                     this.onRoomJoin(this.roomId);
                 }
                 this.updatePlayerList();
+                break;
+
+            case 'requestColorAssignment':
+                if (this.isHost) {
+                    console.log('[NetworkManager] Host received color request from:', message.playerId);
+                    const characterManager = this.gameLoop.characterManager;
+                    
+                    // Check if we already assigned a color to this player
+                    let assignedColor = characterManager.playerColors.get(message.playerId);
+                    
+                    // If no color was assigned yet, assign a new one
+                    if (!assignedColor) {
+                        assignedColor = characterManager.assignColorToPlayer(message.playerId);
+                        // Store the color assignment in the host's map
+                        characterManager.playerColors.set(message.playerId, assignedColor);
+                    }
+                    
+                    console.log('[NetworkManager] Host assigning/confirming color:', {
+                        targetPlayer: message.playerId,
+                        color: assignedColor,
+                        isNewAssignment: !characterManager.playerColors.has(message.playerId)
+                    });
+                    
+                    // Send the color assignment to all players
+                    this.ws.send(JSON.stringify({
+                        type: 'colorAssignment',
+                        targetPlayerId: message.playerId,
+                        color: assignedColor,
+                        roomId: message.roomId
+                    }));
+                }
+                break;
+
+            case 'colorAssignment':
+                console.log('[NetworkManager] Received color assignment:', {
+                    message,
+                    currentPlayerId: this.playerId,
+                    isHost: this.isHost,
+                    localPlayerColor: this.gameLoop.characterManager.player?.color
+                });
+                
+                const characterManager = this.gameLoop.characterManager;
+                const targetPlayerId = message.targetPlayerId;
+                
+                // Always apply the color assignment regardless of host status
+                if (targetPlayerId === this.playerId) {
+                    console.log('[NetworkManager] Applying color to local player:', {
+                        color: message.color,
+                        previousColor: characterManager.player?.color
+                    });
+                    if (characterManager.player) {
+                        characterManager.player.color = message.color;
+                        characterManager.playerColors.set(this.playerId, message.color);
+                        // Force a UI update
+                        characterManager.updateCharacterList();
+                    }
+                } else {
+                    console.log('[NetworkManager] Applying color to network player:', {
+                        targetPlayerId,
+                        color: message.color,
+                        existingPlayer: characterManager.networkPlayers.has(targetPlayerId),
+                        existingColor: characterManager.networkPlayers.get(targetPlayerId)?.color
+                    });
+                    let networkPlayer = characterManager.networkPlayers.get(targetPlayerId);
+                    if (networkPlayer) {
+                        networkPlayer.color = message.color;
+                    }
+                    // Store the color for when the player is created
+                    characterManager.playerColors.set(targetPlayerId, message.color);
+                }
                 break;
 
             case 'hostUpdate':
@@ -176,6 +289,24 @@ export class NetworkManager {
             case 'playerJoined':
                 console.log('Player joined:', message.playerId);
                 this.players.add(message.playerId);
+                
+                // If we're the host, assign a color to the new player
+                if (this.isHost) {
+                    const characterManager = this.gameLoop.characterManager;
+                    const assignedColor = characterManager.assignColorToPlayer(message.playerId);
+                    console.log('[NetworkManager] Host assigning color to new player:', {
+                        targetPlayer: message.playerId,
+                        color: assignedColor
+                    });
+                    
+                    // Send the color assignment to all players
+                    this.ws.send(JSON.stringify({
+                        type: 'colorAssignment',
+                        targetPlayerId: message.playerId,
+                        color: assignedColor
+                    }));
+                }
+                
                 if (message.isHost !== undefined) {
                     console.log('Host status update:', { playerId: message.playerId, isHost: message.isHost });
                     this.handleHostUpdate(message.playerId, message.isHost);
@@ -271,42 +402,48 @@ export class NetworkManager {
 
     sendState(frame, state) {
         if (this.connected && this.ready) {
+            // Add player ID to state before sending
+            const stateWithId = {
+                ...state,
+                playerId: this.playerId
+            };
+            
             this.ws.send(JSON.stringify({
                 type: 'state',
                 frame: frame,
-                state: state
+                state: stateWithId
             }));
         }
     }
 
     handleStateUpdate(frame, state) {
-        console.log('Received state update:', {
-            frame,
-            networkPlayers: Array.from(state.networkPlayers.entries()).map(([id, player]) => ({
-                id,
-                x: player.x,
-                y: player.y,
-                hearts: player.hearts,
-                isFlashing: player.isFlashing
-            }))
-        });
-
-        // Compare received state with local prediction
-        const localState = this.gameLoop.stateManager.getState(frame);
-        if (localState && !this.gameLoop.stateManager.statesMatch(localState, state)) {
-            // State mismatch detected, trigger rollback
-            console.log('State mismatch detected at frame', frame, {
-                local: {
-                    networkPlayers: Array.from(localState.networkPlayers.entries()),
-                    player: localState.player
-                },
-                remote: {
-                    networkPlayers: Array.from(state.networkPlayers.entries()),
-                    player: state.player
-                }
-            });
-            this.gameLoop.stateManager.rollback(frame, this.gameLoop);
+        // Skip state updates for local player
+        if (state.playerId === this.playerId) {
+            return;
         }
+
+        // Get the network player
+        const networkPlayer = this.gameLoop.characterManager.networkPlayers.get(state.playerId);
+        if (!networkPlayer) {
+            // Only log when we can't find a player - this is an error condition
+            console.log('[NetworkManager] No network player found for ID:', state.playerId);
+            return;
+        }
+
+        // Update network player state
+        networkPlayer.x = state.x;
+        networkPlayer.y = state.y;
+        networkPlayer.velocityX = state.velocityX;
+        networkPlayer.velocityY = state.velocityY;
+        networkPlayer.direction = state.direction;
+        networkPlayer.isJumping = state.isJumping;
+        networkPlayer.isRushing = state.isRushing;
+        networkPlayer.isFlashing = state.isFlashing;
+        networkPlayer.isDead = state.isDead;
+        networkPlayer.hearts = state.hearts;
+
+        // Update the game state's network player data
+        this.gameLoop.gameState.updateNetworkPlayer(state.playerId, networkPlayer);
     }
 
     startGame(players, timestamp) {

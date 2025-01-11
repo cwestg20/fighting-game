@@ -318,6 +318,29 @@ wss.on('connection', (ws) => {
                         });
                     }
                     break;
+
+                case 'requestColorAssignment':
+                    if (currentRoom) {
+                        // Forward the color request to all players (the host will respond)
+                        currentRoom.broadcast({
+                            type: 'requestColorAssignment',
+                            playerId: playerId,
+                            roomId: currentRoom.id
+                        });
+                    }
+                    break;
+
+                case 'colorAssignment':
+                    if (currentRoom) {
+                        // Forward the color assignment to all players
+                        currentRoom.broadcast({
+                            type: 'colorAssignment',
+                            targetPlayerId: data.targetPlayerId,
+                            color: data.color,
+                            roomId: currentRoom.id
+                        });
+                    }
+                    break;
             }
         } catch (error) {
             console.error('Error processing message:', error);

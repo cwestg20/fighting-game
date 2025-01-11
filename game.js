@@ -39,6 +39,7 @@ const FRAME_RATE = 60;
 const FRAME_TIME = 1000 / FRAME_RATE;
 const MAX_FRAME_SKIP = 5;
 const INITIAL_SEED = 12345; // Fixed seed for deterministic gameplay
+const STATE_BROADCAST_INTERVAL = 2; // Send state every 2 frames
 
 class GameLoop {
     constructor(game) {
@@ -52,6 +53,7 @@ class GameLoop {
         this.isVisible = true;
         this.isRunning = false;
         this.animationFrameId = null;
+        this.networkManager = null; // Reference to network manager
 
         // Add visibility change listener
         document.addEventListener('visibilitychange', () => {
@@ -97,6 +99,26 @@ class GameLoop {
         while (this.frameDelta >= this.fixedTimeStep && updates < MAX_FRAME_SKIP) {
             this.gameState.update();
             this.game.fixedUpdate(this.fixedTimeStep, this.gameState);
+            
+            // Broadcast state on interval if we're connected
+            if (this.networkManager && this.networkManager.connected && 
+                this.frameNumber % STATE_BROADCAST_INTERVAL === 0) {
+                const playerState = {
+                    frame: this.frameNumber,
+                    x: player.x,
+                    y: player.y,
+                    velocityX: player.velocityX,
+                    velocityY: player.velocityY,
+                    direction: player.direction,
+                    isJumping: player.isJumping,
+                    isRushing: player.isRushing,
+                    isFlashing: player.isFlashing,
+                    isDead: player.isDead,
+                    hearts: player.hearts
+                };
+                this.networkManager.sendState(this.frameNumber, playerState);
+            }
+
             this.frameDelta -= this.fixedTimeStep;
             updates++;
             this.frameNumber++;
@@ -458,21 +480,21 @@ function render() {
     // Draw platforms
     platforms.forEach(platform => platform.draw(ctx));
     
-    // Draw player if not dead
-    if (!player.isDead) {
+    // Draw local player if not dead
+    if (!player.isDead && player.isLocalPlayer) {
         player.draw(ctx);
     }
     
     // Draw network players
     for (const [playerId, networkPlayer] of gameState.networkPlayers) {
-        if (networkPlayer && !networkPlayer.isDead) {
+        if (networkPlayer && !networkPlayer.isDead && networkPlayer.isNetworkPlayer) {
             networkPlayer.draw(ctx);
         }
     }
     
-    // Draw enemies (only if they're alive)
+    // Draw AI enemies (only if they're alive)
     enemies.forEach(enemy => {
-        if (!enemy.isDead) {
+        if (!enemy.isDead && enemy.isAI) {
             enemy.draw(ctx);
         }
     });
@@ -496,7 +518,9 @@ function render() {
         const allCharacters = [...enemies];
         // Add network players to the list
         gameState.networkPlayers.forEach(player => {
-            allCharacters.push(player);
+            if (player.isNetworkPlayer) { // Only add network players
+                allCharacters.push(player);
+            }
         });
         minimap.draw(ctx, VIEWPORT_WIDTH, player, allCharacters, platforms, sphereRadius);
     }
@@ -535,9 +559,10 @@ function initializeGame() {
     // Create platforms
     createPlatforms();
     
-    // Initialize player
-    player = new Character(200, WORLD_HEIGHT - 100, 'blue', true);
+    // Initialize player with temporary color until assigned by host
+    player = new Character(200, WORLD_HEIGHT - 100, 'gray', true);
     player.isPlayer = true;
+    player.isLocalPlayer = true;
     // player.id will be set when received from network
     
     // Initialize enemies array with some default enemies
@@ -546,6 +571,7 @@ function initializeGame() {
         new Character(200, WORLD_HEIGHT - 100, 'green'),
         new Character(WORLD_WIDTH - 200, WORLD_HEIGHT - 100, 'purple')
     ];
+    enemies.forEach(enemy => enemy.isAI = true);
     
     // Initialize input handler
     inputHandler = new InputHandler();
@@ -573,7 +599,8 @@ function initializeGame() {
 
     // Initialize network manager
     networkManager = new NetworkManager(gameLoop);
-    window.networkManager = networkManager; // Make it globally accessible
+    window.networkManager = networkManager;
+    gameLoop.networkManager = networkManager;
     
     networkManager.onConnectionStatusChange = (status) => {
         if (networkStatus) {
@@ -602,6 +629,19 @@ function initializeGame() {
             player.id = networkManager.playerId;
             characterManager.updateCharacterList();
         }
+
+        // Get set of current player IDs
+        const currentPlayerIds = new Set(players.map(p => p.id));
+
+        // Remove players that are no longer in the game
+        Array.from(characterManager.networkPlayers.keys()).forEach(id => {
+            if (!currentPlayerIds.has(id)) {
+                characterManager.removeNetworkPlayer(id);
+                characterManager.playerColors.delete(id); // Clean up color assignment
+            }
+        });
+
+        // Add or update remaining players
         players.forEach(player => {
             if (player.ready) {
                 characterManager.addNetworkPlayer(player.id);
