@@ -1,3 +1,5 @@
+import { Bullet } from './bullet.js';
+
 export class NetworkManager {
     constructor(gameLoop) {
         this.gameLoop = gameLoop;
@@ -357,6 +359,10 @@ export class NetworkManager {
                 );
                 // ... rest of the gameState handling
                 break;
+
+            case 'bulletCreated':
+                this.handleBulletEvent(message);
+                break;
         }
     }
 
@@ -446,6 +452,39 @@ export class NetworkManager {
         networkPlayer.isDead = state.isDead;
         networkPlayer.hearts = state.hearts;
 
+        // Handle bullet updates if present
+        if (state.bullets && Array.isArray(state.bullets)) {
+            state.bullets.forEach(bulletData => {
+                if (!bulletData || !bulletData.ownerId) {
+                    console.warn('[NetworkManager] Invalid bullet data received:', bulletData);
+                    return;
+                }
+
+                // Create new bullets that we don't have
+                const existingBullet = this.gameLoop.game.bullets.find(b => 
+                    b && b.owner && b.owner.id === bulletData.ownerId && 
+                    Math.abs(b.x - bulletData.x) < 5 && 
+                    Math.abs(b.y - bulletData.y) < 5
+                );
+
+                if (!existingBullet) {
+                    console.log('[NetworkManager] Creating bullet from state update:', {
+                        ownerId: bulletData.ownerId,
+                        ownerColor: networkPlayer.color,
+                        position: { x: bulletData.x, y: bulletData.y }
+                    });
+
+                    const newBullet = new Bullet(
+                        bulletData.x,
+                        bulletData.y,
+                        Math.sign(bulletData.velocityX),
+                        networkPlayer
+                    );
+                    this.gameLoop.game.bullets.push(newBullet);
+                }
+            });
+        }
+
         // Update the game state's network player data
         this.gameLoop.gameState.updateNetworkPlayer(state.playerId, networkPlayer);
     }
@@ -470,5 +509,78 @@ export class NetworkManager {
         if (this.ws) {
             this.ws.close();
         }
+    }
+
+    updateNetworkPlayerState(state) {
+        // Skip state updates for local player
+        if (state.playerId === this.playerId) {
+            return;
+        }
+
+        // Get the network player
+        const networkPlayer = this.gameLoop.characterManager.networkPlayers.get(state.playerId);
+        if (!networkPlayer) {
+            // Only log when we can't find a player - this is an error condition
+            console.log('[NetworkManager] No network player found for ID:', state.playerId);
+            return;
+        }
+
+        // Update network player state
+        networkPlayer.x = state.x;
+        networkPlayer.y = state.y;
+        networkPlayer.velocityX = state.velocityX;
+        networkPlayer.velocityY = state.velocityY;
+        networkPlayer.direction = state.direction;
+        networkPlayer.isJumping = state.isJumping;
+        networkPlayer.isRushing = state.isRushing;
+        networkPlayer.isFlashing = state.isFlashing;
+        networkPlayer.isDead = state.isDead;
+        networkPlayer.hearts = state.hearts;
+
+        // Update the game state's network player data
+        this.gameLoop.gameState.updateNetworkPlayer(state.playerId, networkPlayer);
+    }
+
+    // Add new method to send bullet creation
+    sendBulletCreated(bullet) {
+        if (!this.connected || !this.ws) return;
+
+        const bulletData = {
+            type: 'bulletCreated',
+            bullet: {
+                x: bullet.x,
+                y: bullet.y,
+                velocityX: bullet.velocityX,
+                ownerId: bullet.owner.id,
+                color: bullet.color
+            }
+        };
+
+        console.log('[NetworkManager] Sending bullet creation:', {
+            ownerId: bullet.owner.id,
+            ownerColor: bullet.owner.color,
+            position: { x: bullet.x, y: bullet.y }
+        });
+
+        this.ws.send(JSON.stringify(bulletData));
+    }
+
+    // Add method to handle incoming bullet events
+    handleBulletEvent(bullet) {
+        const owner = this.gameLoop.characterManager.findCharacterById(bullet.ownerId);
+        if (!owner) return;
+
+        const newBullet = new Bullet(
+            bullet.x,
+            bullet.y,
+            Math.sign(bullet.velocityX),
+            owner,
+            {
+                isNetworkBullet: true,
+                ownerId: bullet.ownerId,
+                ownerColor: owner.color
+            }
+        );
+        this.gameLoop.game.bullets.push(newBullet);
     }
 } 

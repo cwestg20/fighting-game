@@ -43,7 +43,13 @@ const STATE_BROADCAST_INTERVAL = 2; // Send state every 2 frames
 
 class GameLoop {
     constructor(game) {
-        this.game = game;
+        // Store game object with bullets array
+        this.game = {
+            fixedUpdate: game.fixedUpdate,
+            render: game.render,
+            bullets: game.bullets || [],  // Use provided bullets array or empty array
+            player: game.player
+        };
         this.lastUpdateTime = 0;
         this.frameDelta = 0;
         this.frameNumber = 0;
@@ -105,16 +111,24 @@ class GameLoop {
                 this.frameNumber % STATE_BROADCAST_INTERVAL === 0) {
                 const playerState = {
                     frame: this.frameNumber,
-                    x: player.x,
-                    y: player.y,
-                    velocityX: player.velocityX,
-                    velocityY: player.velocityY,
-                    direction: player.direction,
-                    isJumping: player.isJumping,
-                    isRushing: player.isRushing,
-                    isFlashing: player.isFlashing,
-                    isDead: player.isDead,
-                    hearts: player.hearts
+                    x: this.game.player.x,
+                    y: this.game.player.y,
+                    velocityX: this.game.player.velocityX,
+                    velocityY: this.game.player.velocityY,
+                    direction: this.game.player.direction,
+                    isJumping: this.game.player.isJumping,
+                    isRushing: this.game.player.isRushing,
+                    isFlashing: this.game.player.isFlashing,
+                    isDead: this.game.player.isDead,
+                    hearts: this.game.player.hearts,
+                    // Add bullet state
+                    bullets: this.game.bullets.filter(b => b.owner === this.game.player).map(b => ({
+                        x: b.x,
+                        y: b.y,
+                        velocityX: b.velocityX,
+                        color: b.color,
+                        ownerId: b.owner.id
+                    }))
                 };
                 this.networkManager.sendState(this.frameNumber, playerState);
             }
@@ -137,7 +151,8 @@ class GameLoop {
 
 // Initialize variables at the top
 let canvas, ctx, healthDisplay, networkStatus;
-let player, enemies, bullets;
+let player, enemies;
+let bullets = []; // Initialize bullets array immediately
 let gameOver = false;
 let sphereRadius;
 let centerX, centerY, safeRadius;
@@ -499,8 +514,37 @@ function render() {
         }
     });
     
+    // Use the correct bullets array from gameLoop.game
+    const gameBullets = gameLoop.game.bullets;
+    // Debug log only network player bullets
+    const networkBullets = gameBullets.filter(bullet => {
+        const isNetwork = bullet.isNetworkBullet === true;
+        return isNetwork;
+    });
+    
+    if (networkBullets.length > 0) {
+        console.log('[Network] Drawing network bullets:', {
+            totalBullets: networkBullets.length,
+            bullets: networkBullets.map(b => ({
+                x: b.x,
+                y: b.y,
+                ownerId: b.ownerId,
+                ownerColor: b.ownerColor,
+                isNetworkBullet: b.isNetworkBullet
+            }))
+        });
+    }
+    
     // Draw bullets
-    bullets.forEach(bullet => bullet.draw(ctx));
+    gameBullets.forEach(bullet => {
+        if (!bullet) return;
+        
+        // Check if bullet is within the canvas bounds before drawing
+        const inBounds = bullet.x >= 0 && bullet.x <= WORLD_WIDTH && bullet.y >= 0 && bullet.y <= WORLD_HEIGHT;
+        if (inBounds) {
+            bullet.draw(ctx);
+        }
+    });
     
     // Draw effects (including death bursts)
     effects.forEach(effect => effect.draw(ctx));
@@ -563,7 +607,6 @@ function initializeGame() {
     player = new Character(200, WORLD_HEIGHT - 100, 'gray', true);
     player.isPlayer = true;
     player.isLocalPlayer = true;
-    // player.id will be set when received from network
     
     // Initialize enemies array with some default enemies
     enemies = [
@@ -572,10 +615,6 @@ function initializeGame() {
         new Character(WORLD_WIDTH - 200, WORLD_HEIGHT - 100, 'purple')
     ];
     enemies.forEach(enemy => enemy.isAI = true);
-    
-    // Initialize input handler
-    inputHandler = new InputHandler();
-    inputHandler.setCharacter(player);
     
     // Initialize camera
     camera = new Camera(VIEWPORT_WIDTH, VIEWPORT_HEIGHT, WORLD_WIDTH, WORLD_HEIGHT, CAMERA_BUFFER);
@@ -586,13 +625,20 @@ function initializeGame() {
     // Initialize character manager
     characterManager = new CharacterManager(player, enemies);
     
-    // Initialize game loop
+    // Clear bullets and effects arrays
+    bullets = [];
+    effects = [];
+    
+    // Initialize game loop with reference to global bullets array
     gameLoop = new GameLoop({
         fixedUpdate: fixedUpdate,
-        render: render
+        render: render,
+        bullets: bullets,  // Pass global bullets array
+        player: player
     });
     gameLoop.gameState = gameState;
     gameLoop.characterManager = characterManager;
+    gameLoop.bullets = bullets; // Add direct reference to bullets
 
     // Initialize debug controls
     initializeDebugControls();
@@ -601,6 +647,10 @@ function initializeGame() {
     networkManager = new NetworkManager(gameLoop);
     window.networkManager = networkManager;
     gameLoop.networkManager = networkManager;
+    
+    // Initialize input handler with network manager AFTER network manager is created
+    inputHandler = new InputHandler(networkManager);
+    inputHandler.setCharacter(player);
     
     networkManager.onConnectionStatusChange = (status) => {
         if (networkStatus) {
@@ -681,10 +731,6 @@ function initializeGame() {
         characterManager.updateCharacterList();
     };
     
-    // Initialize bullets and effects arrays
-    bullets = [];
-    effects = [];
-    
     // Start game loop
     gameLoop.start();
     
@@ -712,7 +758,7 @@ function fixedUpdate(timeStep, gameState) {
     // Update game objects
     // Only update player if they're not dead
     if (!player.isDead) {
-        inputHandler.update(timeStep, player, bullets, Bullet, gameState);
+        inputHandler.update(timeStep, player, gameLoop.game.bullets, Bullet, gameState);
     }
     player.update(timeStep, timeStep, platforms, WORLD_WIDTH, WORLD_HEIGHT, sphereRadius, inputHandler.isKeyPressed.bind(inputHandler), endGame, DeathBurst, effects, gameState);
     
@@ -729,11 +775,21 @@ function fixedUpdate(timeStep, gameState) {
     updateAI(timeStep, timeStep, gameState);
     
     // Update bullets with timeStep
-    bullets = bullets.filter(bullet => {
+    const bulletsBefore = gameLoop.game.bullets.length;
+    gameLoop.game.bullets = gameLoop.game.bullets.filter(bullet => {
         bullet.update(timeStep);
         
         // Remove bullets that are out of bounds
         if (bullet.x < 0 || bullet.x > WORLD_WIDTH) {
+            // Only log for network player bullets
+            if (bullet.owner && bullet.owner.isNetworkPlayer && gameState.networkPlayers.has(bullet.owner.id)) {
+                console.log('[Network] Removing out of bounds bullet:', {
+                    x: bullet.x,
+                    y: bullet.y,
+                    owner: bullet.owner.id,
+                    ownerColor: bullet.owner.color
+                });
+            }
             return false;
         }
         
@@ -741,10 +797,12 @@ function fixedUpdate(timeStep, gameState) {
         if (debugControls.bulletCollision) {
             // Check player collision only if player is alive
             if (!player.isDead && bullet.checkCollision(player)) {
-                console.log('Bullet hit player');
+                // Only log if it's a network player's bullet
+                if (bullet.owner && bullet.owner.isNetworkPlayer) {
+                    console.log('[Network] Bullet hit local player from:', bullet.owner.id);
+                }
                 // Only apply damage if not already flashing
                 if (!player.isFlashing && player.takeDamage(gameState)) {
-                    console.log('Player took damage, hearts:', player.hearts);
                     if (player.hearts <= 0) {
                         player.isDead = true;
                         effects.push(new DeathBurst(player.x + player.width/2, player.y + player.height/2, player.color, gameState));
@@ -797,6 +855,25 @@ function fixedUpdate(timeStep, gameState) {
         
         return true; // Keep bullet if no damage was dealt
     });
+    
+    // Only log bullet changes if network bullets were involved
+    const networkBulletsBefore = bulletsBefore > 0 ? gameLoop.game.bullets.filter(b => 
+        b.owner && b.owner.isNetworkPlayer && 
+        gameState.networkPlayers.has(b.owner.id)
+    ).length : 0;
+    
+    const networkBulletsAfter = gameLoop.game.bullets.filter(b => 
+        b.owner && b.owner.isNetworkPlayer && 
+        gameState.networkPlayers.has(b.owner.id)
+    ).length;
+    
+    if (networkBulletsBefore !== networkBulletsAfter) {
+        console.log('[Network] Network bullets changed:', {
+            before: networkBulletsBefore,
+            after: networkBulletsAfter,
+            removed: networkBulletsBefore - networkBulletsAfter
+        });
+    }
     
     // Update effects
     effects = effects.filter(effect => effect.update());

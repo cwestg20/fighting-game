@@ -341,6 +341,18 @@ wss.on('connection', (ws) => {
                         });
                     }
                     break;
+
+                case 'bulletCreated':
+                    if (currentRoom && !currentRoom.isMatchmaking) {
+                        console.log(`Player ${playerId} fired bullet:`, data.bullet);
+                        // Broadcast bullet creation to all players except shooter
+                        currentRoom.broadcast({
+                            type: 'bulletCreated',
+                            bullet: data.bullet
+                        }, playerId);
+                        console.log('Bullet event broadcasted to room:', currentRoom.id);
+                    }
+                    break;
             }
         } catch (error) {
             console.error('Error processing message:', error);

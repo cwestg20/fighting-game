@@ -2,10 +2,10 @@
 import { MOVE_SPEED } from './character.js';
 
 export class InputHandler {
-    constructor(player) {
-        this.player = player;
+    constructor(networkManager) {
         this.keys = {};
-        this.character = player;
+        this.character = null;
+        this.networkManager = networkManager;
 
         // Bind event listeners
         document.addEventListener('keydown', (e) => {
@@ -70,7 +70,13 @@ export class InputHandler {
         if ((this.keys['o'] || this.keys['O']) && player.canShoot(gameState)) {
             const bulletData = player.shoot(gameState);
             if (bulletData) {
-                bullets.push(new Bullet(bulletData.x, bulletData.y, bulletData.direction, bulletData.owner));
+                const bullet = new Bullet(bulletData.x, bulletData.y, bulletData.direction, bulletData.owner);
+                bullets.push(bullet);
+                
+                // Send bullet creation event to network
+                if (this.networkManager) {
+                    this.networkManager.sendBulletCreated(bullet);
+                }
             }
         }
     }

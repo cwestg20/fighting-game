@@ -12,13 +12,22 @@ function checkCollision(rect1, rect2) {
 }
 
 class Bullet {
-    constructor(x, y, direction, owner) {
+    constructor(x, y, direction, owner, options = {}) {
         this.x = x;
         this.y = y;
         this.radius = 4;
         this.velocityX = direction * BULLET_SPEED * (1/60); // Scale for one frame
         this.owner = owner;
-        this.color = this.lightenColor(owner.color, 50);  // 50% lighter
+        // Network properties
+        this.isNetworkBullet = options.isNetworkBullet || false;
+        this.ownerId = options.ownerId || owner.id;
+        this.ownerColor = options.ownerColor || owner.color;
+        
+        // Set color based on whether it's a network bullet
+        this.color = this.isNetworkBullet ? 
+            this.lightenColor(this.ownerColor, 50) : 
+            this.lightenColor(owner.color, 50);
+            
         // Add debug bounds
         this.width = this.radius * 2;
         this.height = this.radius * 2;
@@ -73,6 +82,15 @@ class Bullet {
     }
 
     draw(ctx) {
+        console.log('[Bullet] Drawing bullet:', {
+            x: this.x,
+            y: this.y,
+            color: this.color,
+            isNetworkBullet: this.isNetworkBullet,
+            ownerId: this.ownerId,
+            ownerColor: this.ownerColor
+        });
+        
         ctx.fillStyle = this.color;
         ctx.beginPath();
         ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
